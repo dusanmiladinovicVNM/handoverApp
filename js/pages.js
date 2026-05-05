@@ -156,9 +156,30 @@ export function pageAdminList() {
       h('div', { class: 'app-layout' },
         appHeader({
           title: 'Inspections',
-          subtitle: getState().adminEmail || '',
+          subtitle: getState().adminLabel || 'Admin',
           actions: [
-            h('button', { class: 'btn btn--sm btn--ghost', style: { color: 'white' }, onClick: () => navigate('/admin/new') }, '+ New')
+            h('button', {
+              class: 'btn btn--sm btn--ghost',
+              style: { color: 'white' },
+              onClick: () => navigate('/admin/new'),
+            }, '+ New'),
+            h('button', {
+              class: 'btn btn--sm btn--ghost',
+              style: { color: 'white' },
+              title: 'Sign out',
+              onClick: async () => {
+                const ok = await confirm({
+                  title: 'Sign out?',
+                  message: 'This removes the admin token from this device. You will need to paste it again to sign back in.',
+                  confirmLabel: 'Sign out',
+                });
+                if (!ok) return;
+                clearAdminToken();
+                setAuth(null);
+                setState({ authMode: 'none', adminToken: null, adminLabel: null });
+                navigate('/login');
+              },
+            }, '⎋'),
           ],
         }),
         h('main', { class: 'app-body' },
