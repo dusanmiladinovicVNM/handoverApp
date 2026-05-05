@@ -31,6 +31,7 @@ import {
   inspectionProgress, findAllMissingRequired
 } from './validator.js';
 import { AUTOSAVE_DEBOUNCE_MS } from './config.js';
+import { tryAdminToken, clearAdminToken, saveAdminToken } from './app.js';
 
 const root = () => document.getElementById('app-root');
 
@@ -51,31 +52,79 @@ export function pageHome() {
     return;
   }
 
-  // Not authenticated
-  mount(root(),
-    h('div', { class: 'app-layout' },
-      appHeader({ title: 'Apartment Handover' }),
-      h('main', { class: 'app-body' },
-        h('div', { class: 'page' },
-          h('div', { class: 'card' },
-            h('h2', { class: 'card__title' }, 'Welcome'),
-            h('p', { class: 'text-muted mt-2' },
-              'This app is for apartment inspections. Internal staff sign in with their Google account. Tenants receive a private link.'),
-            state.authError
-              ? h('div', { class: 'banner banner--danger mt-4' },
-                  h('div', { class: 'banner__icon' }, '!'),
-                  h('div', { class: 'banner__body' },
-                    h('strong', null, 'Sign-in failed: '),
-                    state.authError)
-                )
-              : null,
-            h('p', { class: 'mt-4 text-sm text-muted' },
-              'If you have an inspection link, use the link directly. Do not visit this page first.'),
+  // Not authenticated → admin login
+  navigate('/login', true);
+}
+
+// ============================================================
+// pageAdminLogin — paste admin token
+// ============================================================
+
+export function pageAdminLogin() {
+  let token = '';
+  let trying = false;
+
+  async function submit() {
+    if (!token.trim()) {
+      toastWarning('Paste a token first.');
+      return;
+    }
+    trying = true; render();
+    const ok = await tryAdminToken(token.trim());
+    trying = false;
+    if (ok) {
+      toastSuccess('Signed in.');
+      navigate('/admin');
+    } else {
+      toastError('Token invalid or expired.');
+      render();
+    }
+  }
+
+  function render() {
+    const state = getState();
+    mount(root(),
+      h('div', { class: 'app-layout' },
+        appHeader({ title: 'Admin Sign-in' }),
+        h('main', { class: 'app-body' },
+          h('div', { class: 'page' },
+            h('div', { class: 'card' },
+              h('h2', { class: 'card__title' }, 'Paste admin token'),
+              h('p', { class: 'text-muted text-sm mt-2' },
+                'Generate a token in the Apps Script editor by running ',
+                h('code', null, 'generateAdminTokenForMe()'),
+                ', then paste the value here. Token is stored on this device only.'),
+              state.authError
+                ? h('div', { class: 'banner banner--warning mt-3' },
+                    h('div', { class: 'banner__icon' }, '!'),
+                    h('div', { class: 'banner__body' }, state.authError))
+                : null,
+              h('div', { class: 'form-group mt-4' },
+                h('label', { class: 'form-label' }, 'Admin token'),
+                h('textarea', {
+                  class: 'form-textarea text-mono text-sm',
+                  rows: '4',
+                  placeholder: 'eyJ...',
+                  onInput: (e) => { token = e.target.value; },
+                  autofocus: true,
+                }, ''),
+              ),
+              h('button', {
+                class: 'btn btn--primary btn--block',
+                disabled: trying || undefined,
+                onClick: submit,
+              }, trying ? 'Verifying…' : 'Sign in'),
+
+              h('hr', { style: { border: 'none', borderTop: '1px solid var(--color-border)', margin: '1.5rem 0' }}),
+              h('p', { class: 'text-xs text-muted' },
+                'If you don\'t have a token, ask the system owner. Tenants do not need to sign in — they receive direct links.'),
+            ),
           )
         )
       )
-    )
-  );
+    );
+  }
+  render();
 }
 
 // ============================================================
