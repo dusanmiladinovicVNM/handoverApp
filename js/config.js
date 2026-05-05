@@ -8,7 +8,7 @@
  * For custom domain at root: '/'.
  */
 
-export const BACKEND_URL = 'PASTE_DEPLOYMENT_URL_HERE';
+export const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbzeHAPRXUJyJnA3K5KmtEAEiaGYZcu0IFtA9qBVAtxAf_WjQo6ZcCduTwKV6e7PrQql/exec';
 export const FRONTEND_BASE_PATH = '/handover-app/';
 
 export const APP_VERSION = '1.0.0';
