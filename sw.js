@@ -25,35 +25,19 @@ const APP_SHELL = [
   './js/state.js',
   './js/api.js',
   './js/config.js',
-  './js/storage.js',
-  './js/schema.js',
   './js/validator.js',
   './js/ui.js',
+  './js/components.js',
+  './js/pages.js',
   './js/utils/dom.js',
   './js/utils/image.js',
   './js/utils/format.js',
-  './js/components/section-list.js',
-  './js/components/question-renderer.js',
-  './js/components/image-uploader.js',
-  './js/components/signature-canvas.js',
-  './js/components/progress-bar.js',
-  './js/components/modal.js',
-  './js/components/toast.js',
-  './js/pages/page-home.js',
-  './js/pages/page-inspection-start.js',
-  './js/pages/page-inspection-section.js',
-  './js/pages/page-review.js',
-  './js/pages/page-sign.js',
-  './js/pages/page-success.js',
-  './js/pages/page-admin-list.js',
-  './js/pages/page-admin-detail.js',
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => {
-      // addAll fails the whole install if any single resource fails. Use individual adds
-      // so the SW installs even if a path doesn't exist yet (during early development).
+      // Use individual adds so SW installs even if some paths 404 during early dev.
       return Promise.all(
         APP_SHELL.map((url) =>
           cache.add(url).catch((err) => console.warn('[SW] failed to cache', url, err))
@@ -78,8 +62,6 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-
-  // Only handle GETs through the cache; everything else goes straight to network.
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
@@ -110,7 +92,6 @@ async function cacheFirst(req) {
     }
     return res;
   } catch (e) {
-    // Offline + not in cache: return a basic offline response for navigations
     if (req.mode === 'navigate') {
       const offline = await caches.match('./index.html');
       if (offline) return offline;
