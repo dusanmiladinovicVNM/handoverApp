@@ -3,14 +3,15 @@
  * Main entry point. Resolves auth, registers routes, starts the router.
  *
  * Auth flow:
- *  - URL has ?t=<token> → tenant flow, token validated server-side on first call
- *  - localStorage has 'adminToken' → admin flow
- *  - Neither → show admin login page (paste token)
+ *  - URL has ?t=<token> → tenant flow
+ *  - localStorage has admin token → admin flow
+ *  - Neither → login page (paste admin token)
  */
 
 import * as Router from './router.js';
-import { setAuth, api, ApiError } from './api.js';
+import { setAuth, api } from './api.js';
 import { setState, getState } from './state.js';
+import { loadAdminToken, loadAdminLabel, clearAdminToken } from './auth.js';
 import {
   pageHome,
   pageAdminLogin,
@@ -23,9 +24,6 @@ import {
   pageSign,
   pageSuccess,
 } from './pages.js';
-
-const ADMIN_TOKEN_STORAGE_KEY = 'handover.adminToken';
-const ADMIN_LABEL_STORAGE_KEY = 'handover.adminLabel';
 
 // ============================================================
 // Service worker
@@ -40,62 +38,6 @@ if ('serviceWorker' in navigator) {
 }
 
 // ============================================================
-// Admin token helpers (exported for use by pages)
-// ============================================================
-
-export function saveAdminToken(token, label) {
-  try {
-    localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
-    if (label) localStorage.setItem(ADMIN_LABEL_STORAGE_KEY, label);
-  } catch (_) {}
-}
-
-export function loadAdminToken() {
-  try {
-    return localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
-  } catch (_) {
-    return null;
-  }
-}
-
-export function loadAdminLabel() {
-  try {
-    return localStorage.getItem(ADMIN_LABEL_STORAGE_KEY) || '';
-  } catch (_) {
-    return '';
-  }
-}
-
-export function clearAdminToken() {
-  try {
-    localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
-    localStorage.removeItem(ADMIN_LABEL_STORAGE_KEY);
-  } catch (_) {}
-}
-
-/**
- * Try a candidate admin token. Returns true if it works.
- * Used by login page after user pastes one.
- */
-export async function tryAdminToken(token) {
-  setAuth({ type: 'token', token });
-  try {
-    await api.getSchemas();
-    saveAdminToken(token);
-    setState({
-      authMode: 'admin',
-      adminToken: token,
-      adminLabel: loadAdminLabel(),
-      authError: null,
-    });
-    return true;
-  } catch (e) {
-    setAuth(null);
-    return false;
-  }
-}
-
-// ============================================================
 // Boot
 // ============================================================
 
@@ -104,17 +46,14 @@ async function boot() {
   const tenantToken = route.query.t;
 
   if (tenantToken) {
-    // Tenant flow — token in URL
     setAuth({ type: 'token', token: tenantToken });
     const match = route.path.match(/^\/inspection\/([^/]+)/);
-    const inspectionId = match ? match[1] : null;
     setState({
       authMode: 'tenant',
       tenantToken,
-      tenantInspectionId: inspectionId,
+      tenantInspectionId: match ? match[1] : null,
     });
   } else {
-    // Admin flow — try saved token
     const savedToken = loadAdminToken();
     if (savedToken) {
       setAuth({ type: 'token', token: savedToken });
@@ -126,7 +65,6 @@ async function boot() {
           adminLabel: loadAdminLabel(),
         });
       } catch (e) {
-        // Token expired or revoked — clear and show login
         clearAdminToken();
         setAuth(null);
         setState({
