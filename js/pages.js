@@ -31,7 +31,7 @@ import {
   inspectionProgress, findAllMissingRequired
 } from './validator.js';
 import { AUTOSAVE_DEBOUNCE_MS } from './config.js';
-import { tryAdminToken, clearAdminToken, saveAdminToken } from './app.js';
+import { tryAdminToken, clearAdminToken, saveAdminToken } from './auth.js';
 
 const root = () => document.getElementById('app-root');
 
