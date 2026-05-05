@@ -9,7 +9,7 @@
  */
 
 export const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbzeHAPRXUJyJnA3K5KmtEAEiaGYZcu0IFtA9qBVAtxAf_WjQo6ZcCduTwKV6e7PrQql/exec';
-export const FRONTEND_BASE_PATH = '/handover-app/';
+export const FRONTEND_BASE_PATH = '/handoverApp/';
 
 export const APP_VERSION = '1.0.0';
 
