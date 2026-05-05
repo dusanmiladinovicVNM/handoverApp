@@ -24,7 +24,7 @@ import {
 } from './components.js';
 import { toastSuccess, toastError, toastWarning, confirm, openModal } from './ui.js';
 import {
-  getState, setState, setInspectionData, patchAnswer, subscribe
+  getState, setState, setInspectionData, patchAnswer
 } from './state.js';
 import {
   buildAnswersMap, isItemVisible, sectionProgress,
@@ -565,16 +565,31 @@ export async function pageInspectionSection({ params }) {
 
   // Pending changes buffer (drained by autosave)
   const pendingItems = {};
+  // Reference to the save indicator element, updated in place (not via re-render)
+  let saveIndicatorEl = null;
+
+  function updateSaveIndicator() {
+    if (!saveIndicatorEl) return;
+    const cur = getState();
+    const fresh = saveIndicator(cur.saveStatus, cur.saveError);
+    saveIndicatorEl.replaceWith(fresh);
+    saveIndicatorEl = fresh;
+  }
 
   function flushSave() {
     if (Object.keys(pendingItems).length === 0) return Promise.resolve();
     const itemsToSend = { ...pendingItems };
     Object.keys(pendingItems).forEach(k => delete pendingItems[k]);
     setState({ saveStatus: 'saving' });
+    updateSaveIndicator();
     return api.saveSection(inspectionId, sectionId, itemsToSend)
-      .then(() => setState({ saveStatus: 'saved', saveError: null }))
+      .then(() => {
+        setState({ saveStatus: 'saved', saveError: null });
+        updateSaveIndicator();
+      })
       .catch((e) => {
         setState({ saveStatus: 'error', saveError: e.message });
+        updateSaveIndicator();
         // Re-add pending items if save failed
         Object.assign(pendingItems, itemsToSend);
         toastError('Save failed. Will retry.');
@@ -585,8 +600,7 @@ export async function pageInspectionSection({ params }) {
 
   function queueChange(itemId, patch) {
     if (!pendingItems[itemId]) {
-      // Pull current value/comment as base
-      const cur = (state.answers[sectionId] || {})[itemId] || {};
+      const cur = (getState().answers[sectionId] || {})[itemId] || {};
       pendingItems[itemId] = { value: cur.value, comment: cur.comment || '' };
     }
     Object.assign(pendingItems[itemId], patch);
@@ -620,6 +634,7 @@ export async function pageInspectionSection({ params }) {
         inspectionId,
         sectionId,
         onChange: (newValue) => {
+          // Update local state silently (no re-render — input keeps focus)
           patchAnswer(sectionId, item.id, { value: newValue });
           queueChange(item.id, { value: newValue });
         },
@@ -635,6 +650,8 @@ export async function pageInspectionSection({ params }) {
     const idx = sections.findIndex(s => s.id === sectionId);
     const nextSection = idx >= 0 && idx < sections.length - 1 ? sections[idx + 1] : null;
 
+    saveIndicatorEl = saveIndicator(cur.saveStatus, cur.saveError);
+
     mount(root(),
       h('div', { class: 'app-layout' },
         appHeader({
@@ -644,7 +661,7 @@ export async function pageInspectionSection({ params }) {
             await flushSave();
             navigate('/inspection/' + inspectionId);
           },
-          actions: [saveIndicator(cur.saveStatus, cur.saveError)],
+          actions: [saveIndicatorEl],
         }),
         h('main', { class: 'app-body app-body--has-bottom-bar' },
           h('div', { class: 'page' },
@@ -688,15 +705,11 @@ export async function pageInspectionSection({ params }) {
     );
   }
 
-  // Re-render on state changes (saveStatus, answers, attachments)
-  const unsubscribe = subscribe(() => render());
   render();
 
   // Cleanup on next route
-  // (router doesn't have hooks for this — stash on window for next page to clean up)
   if (window._currentPageCleanup) window._currentPageCleanup();
   window._currentPageCleanup = () => {
-    unsubscribe();
     window.removeEventListener('beforeunload', onBeforeUnload);
     flushSave();
   };
