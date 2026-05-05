@@ -1,0 +1,125 @@
+/* ============================================================
+   tokens.css — design tokens
+   Mobile-first. iOS-friendly safe areas. Single source of truth.
+   ============================================================ */
+
+:root {
+  /* Color palette: documentary, professional, low-contrast for long use. */
+  --color-bg:           #f4f5f7;
+  --color-surface:      #ffffff;
+  --color-surface-alt:  #fafbfc;
+  --color-border:       #d8dde3;
+  --color-border-strong:#b8c0c9;
+
+  --color-text:         #1c2530;
+  --color-text-muted:   #5b6573;
+  --color-text-subtle:  #8590a0;
+
+  --color-primary:      #1a3a52;   /* deep blue — primary actions, headers */
+  --color-primary-hover:#244c6b;
+  --color-primary-soft: #e6edf3;
+
+  --color-accent:       #c47d2c;   /* warm amber — highlights, status badges */
+
+  --color-success:      #2d7a4f;
+  --color-success-soft: #e1f0e8;
+  --color-warning:      #b8721e;
+  --color-warning-soft: #fbeed7;
+  --color-danger:       #b53a2c;
+  --color-danger-soft:  #fbe3df;
+  --color-info:         #2c5d8a;
+  --color-info-soft:    #e1ecf6;
+
+  /* Status colors (semantic) */
+  --status-draft-bg:           #e6edf3;
+  --status-draft-fg:            #1a3a52;
+  --status-review-bg:          #fbeed7;
+  --status-review-fg:           #8a5114;
+  --status-locked-bg:          #fdebd0;
+  --status-locked-fg:           #8a4f0e;
+  --status-partial-bg:         #e1ecf6;
+  --status-partial-fg:          #1f4866;
+  --status-signed-bg:          #e1f0e8;
+  --status-signed-fg:           #1f5a3a;
+  --status-archived-bg:        #ededee;
+  --status-archived-fg:         #5b6573;
+  --status-cancelled-bg:       #fbe3df;
+  --status-cancelled-fg:        #8a2620;
+
+  /* Spacing (rem-based, base 16px) */
+  --space-1: 0.25rem;  /* 4 */
+  --space-2: 0.5rem;   /* 8 */
+  --space-3: 0.75rem;  /* 12 */
+  --space-4: 1rem;     /* 16 */
+  --space-5: 1.25rem;  /* 20 */
+  --space-6: 1.5rem;   /* 24 */
+  --space-8: 2rem;     /* 32 */
+  --space-10: 2.5rem;  /* 40 */
+  --space-12: 3rem;    /* 48 */
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --text-xs:   0.75rem;
+  --text-sm:   0.875rem;
+  --text-base: 1rem;
+  --text-lg:   1.125rem;
+  --text-xl:   1.25rem;
+  --text-2xl:  1.5rem;
+  --text-3xl:  1.875rem;
+
+  --leading-tight:  1.25;
+  --leading-normal: 1.5;
+  --leading-loose:  1.75;
+
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* Borders & radii */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-pill: 9999px;
+
+  --border-thin:  1px solid var(--color-border);
+  --border-medium: 1px solid var(--color-border-strong);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(28, 37, 48, 0.06);
+  --shadow-md: 0 2px 8px rgba(28, 37, 48, 0.08), 0 1px 2px rgba(28, 37, 48, 0.04);
+  --shadow-lg: 0 8px 24px rgba(28, 37, 48, 0.12), 0 2px 4px rgba(28, 37, 48, 0.06);
+
+  /* Layout */
+  --header-height: 3.5rem;
+  --bottom-bar-height: 4rem;
+  --max-content-width: 720px;
+
+  /* Safe areas (iOS notch/home indicator) */
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left, 0px);
+  --safe-right:  env(safe-area-inset-right, 0px);
+
+  /* Motion */
+  --transition-fast: 120ms ease;
+  --transition-base: 200ms ease;
+  --transition-slow: 320ms ease;
+
+  /* Z-index */
+  --z-header: 100;
+  --z-bottom-bar: 100;
+  --z-toast: 900;
+  --z-modal: 1000;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-fast: 0ms;
+    --transition-base: 0ms;
+    --transition-slow: 0ms;
+  }
+}
