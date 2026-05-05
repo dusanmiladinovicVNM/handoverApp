@@ -1,6 +1,11 @@
 /**
  * app.js
  * Main entry point. Resolves auth, registers routes, starts the router.
+ *
+ * Auth flow:
+ *  - URL has ?t=<token> → tenant flow, token validated server-side on first call
+ *  - localStorage has 'adminToken' → admin flow
+ *  - Neither → show admin login page (paste token)
  */
 
 import * as Router from './router.js';
@@ -8,6 +13,7 @@ import { setAuth, api, ApiError } from './api.js';
 import { setState, getState } from './state.js';
 import {
   pageHome,
+  pageAdminLogin,
   pageAdminList,
   pageAdminNew,
   pageAdminDetail,
@@ -18,8 +24,11 @@ import {
   pageSuccess,
 } from './pages.js';
 
+const ADMIN_TOKEN_STORAGE_KEY = 'handover.adminToken';
+const ADMIN_LABEL_STORAGE_KEY = 'handover.adminLabel';
+
 // ============================================================
-// Service worker registration
+// Service worker
 // ============================================================
 
 if ('serviceWorker' in navigator) {
@@ -31,44 +40,104 @@ if ('serviceWorker' in navigator) {
 }
 
 // ============================================================
-// Boot — resolve auth based on URL
+// Admin token helpers (exported for use by pages)
+// ============================================================
+
+export function saveAdminToken(token, label) {
+  try {
+    localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
+    if (label) localStorage.setItem(ADMIN_LABEL_STORAGE_KEY, label);
+  } catch (_) {}
+}
+
+export function loadAdminToken() {
+  try {
+    return localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
+  } catch (_) {
+    return null;
+  }
+}
+
+export function loadAdminLabel() {
+  try {
+    return localStorage.getItem(ADMIN_LABEL_STORAGE_KEY) || '';
+  } catch (_) {
+    return '';
+  }
+}
+
+export function clearAdminToken() {
+  try {
+    localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(ADMIN_LABEL_STORAGE_KEY);
+  } catch (_) {}
+}
+
+/**
+ * Try a candidate admin token. Returns true if it works.
+ * Used by login page after user pastes one.
+ */
+export async function tryAdminToken(token) {
+  setAuth({ type: 'token', token });
+  try {
+    await api.getSchemas();
+    saveAdminToken(token);
+    setState({
+      authMode: 'admin',
+      adminToken: token,
+      adminLabel: loadAdminLabel(),
+      authError: null,
+    });
+    return true;
+  } catch (e) {
+    setAuth(null);
+    return false;
+  }
+}
+
+// ============================================================
+// Boot
 // ============================================================
 
 async function boot() {
-  // Read tenant token from URL hash query, e.g. #/inspection/INS-...?t=<token>
   const route = Router.getCurrentRoute();
   const tenantToken = route.query.t;
 
   if (tenantToken) {
-    // Tenant flow
+    // Tenant flow — token in URL
     setAuth({ type: 'token', token: tenantToken });
-
-    // Try to extract inspection ID from path
     const match = route.path.match(/^\/inspection\/([^/]+)/);
     const inspectionId = match ? match[1] : null;
-
     setState({
       authMode: 'tenant',
       tenantToken,
       tenantInspectionId: inspectionId,
     });
   } else {
-    // Admin flow — try Google login
-    setAuth({ type: 'google' });
-    try {
-      // Light call to verify session
-      await api.getSchemas();
-      const email = ''; // Not exposed by API; could add a 'whoami' endpoint later
-      setState({ authMode: 'admin', adminEmail: email });
-    } catch (e) {
-      if (e.code === 'UNAUTHORIZED' || e.code === 'FORBIDDEN') {
-        setState({ authMode: 'none', authError: e.message });
-      } else if (e.code === 'INTERNAL_ERROR' && /Backend URL not configured/.test(e.message)) {
-        setState({ authMode: 'none', authError: e.message });
-      } else {
-        // Network error — stay in unknown, but allow user to try
-        setState({ authMode: 'none', authError: e.message });
+    // Admin flow — try saved token
+    const savedToken = loadAdminToken();
+    if (savedToken) {
+      setAuth({ type: 'token', token: savedToken });
+      try {
+        await api.getSchemas();
+        setState({
+          authMode: 'admin',
+          adminToken: savedToken,
+          adminLabel: loadAdminLabel(),
+        });
+      } catch (e) {
+        // Token expired or revoked — clear and show login
+        clearAdminToken();
+        setAuth(null);
+        setState({
+          authMode: 'none',
+          authError: e.code === 'UNAUTHORIZED'
+            ? 'Saved admin token is invalid or expired. Paste a new one.'
+            : e.message,
+        });
       }
+    } else {
+      setState({ authMode: 'none' });
     }
   }
 
@@ -81,8 +150,8 @@ async function boot() {
 // ============================================================
 
 function registerRoutes() {
-  // Tenant lands directly on /inspection/:id (with ?t= token)
   Router.route('/', pageHome);
+  Router.route('/login', pageAdminLogin);
   Router.route('/admin', requireAdmin(pageAdminList));
   Router.route('/admin/new', requireAdmin(pageAdminNew));
   Router.route('/admin/inspection/:id', requireAdmin(pageAdminDetail));
@@ -102,7 +171,6 @@ function registerRoutes() {
       </div>`;
   });
 
-  // Run cleanup hooks when route changes (used by section page for autosave)
   Router.onChange(() => {
     if (window._currentPageCleanup) {
       try { window._currentPageCleanup(); } catch (_) {}
@@ -114,8 +182,7 @@ function registerRoutes() {
 function requireAdmin(handler) {
   return (ctx) => {
     if (getState().authMode !== 'admin') {
-      // Tenants can't access admin routes — bounce home
-      Router.navigate('/', true);
+      Router.navigate('/login', true);
       return;
     }
     handler(ctx);
