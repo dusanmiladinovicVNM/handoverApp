@@ -1,5 +1,5 @@
 /**
- * pages.js
+ * pages.js 
  * All page renderers. Each `pageX(ctx)` writes its content into #app-root.
  *
  * Pages:
