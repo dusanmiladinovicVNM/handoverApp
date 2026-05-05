@@ -8,12 +8,13 @@
 const _state = {
   // Auth resolution at boot:
   //   'unknown'  — not yet checked
-  //   'admin'    — google login, in allowlist
-  //   'tenant'   — token from URL, validated
-  //   'none'     — no auth available (show home page with sign-in prompt)
+  //   'admin'    — admin token (from localStorage), verified
+  //   'tenant'   — tenant token from URL ?t=, verified
+  //   'none'     — no auth available (show admin login screen)
   authMode: 'unknown',
   authError: null,
-  adminEmail: null,
+  adminToken: null,
+  adminLabel: null,
   tenantToken: null,
   tenantInspectionId: null,
 
