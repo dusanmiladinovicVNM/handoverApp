@@ -970,10 +970,83 @@ export async function pageSign({ params }) {
   let signerName = '';
   let accepted = false;
   let submitting = false;
-  let pad;
+
+  // Create signature pad ONCE — it must survive checkbox/role re-renders
+  const pad = signatureCanvas();
+
+  // Refs to elements that may need re-rendering
+  let roleSection = null;
+  let acceptedRow = null;
+  let submitButton = null;
+
+  function buildRoleSection() {
+    if (availableRoles.length > 1) {
+      return h('div', { class: 'form-group' },
+        h('label', { class: 'form-label' }, 'Signing as'),
+        h('div', { class: 'form-options' },
+          remainingRoles.map(r => h('div', {
+            class: ['form-check', 'form-check--radio', currentRole === r ? 'form-check--checked' : null],
+            role: 'radio',
+            tabindex: '0',
+            'aria-checked': currentRole === r ? 'true' : 'false',
+            onClick: () => {
+              currentRole = r;
+              const fresh = buildRoleSection();
+              roleSection.replaceWith(fresh);
+              roleSection = fresh;
+            },
+          },
+            h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
+            h('span', { class: 'form-check__label' }, r === 'tenant' ? 'Tenant' : r === 'landlord' ? 'Landlord' : r),
+          )),
+        ),
+      );
+    }
+    return h('div', { class: 'banner banner--info' },
+      h('div', { class: 'banner__icon' }, 'i'),
+      h('div', { class: 'banner__body' },
+        'Signing as ', h('strong', null, currentRole === 'tenant' ? 'Tenant' : 'Landlord')));
+  }
+
+  function buildAcceptedRow() {
+    return h('div', {
+      class: ['form-check', accepted ? 'form-check--checked' : null],
+      role: 'checkbox',
+      tabindex: '0',
+      'aria-checked': accepted ? 'true' : 'false',
+      onClick: () => {
+        accepted = !accepted;
+        const fresh = buildAcceptedRow();
+        acceptedRow.replaceWith(fresh);
+        acceptedRow = fresh;
+      },
+    },
+      h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
+      h('span', { class: 'form-check__label' },
+        'I confirm the contents of this inspection are accurate and that I am the named signer.',
+      ),
+    );
+  }
+
+  function buildSubmitButton() {
+    return h('button', {
+      class: 'btn btn--primary bottom-bar__primary',
+      disabled: submitting || undefined,
+      onClick: submit,
+    }, submitting ? 'Submitting…' : 'Submit signature');
+  }
+
+  function updateSubmitButton() {
+    if (!submitButton) return;
+    const fresh = buildSubmitButton();
+    submitButton.replaceWith(fresh);
+    submitButton = fresh;
+  }
 
   function render() {
-    pad = signatureCanvas();
+    roleSection = buildRoleSection();
+    acceptedRow = buildAcceptedRow();
+    submitButton = buildSubmitButton();
 
     mount(root(),
       h('div', { class: 'app-layout' },
@@ -985,26 +1058,7 @@ export async function pageSign({ params }) {
               h('p', { class: 'card__meta' }, inspectionTypeLabel(insp.inspectionType), ' · ', insp.inspectionId),
             ),
 
-            availableRoles.length > 1
-              ? h('div', { class: 'form-group' },
-                  h('label', { class: 'form-label' }, 'Signing as'),
-                  h('div', { class: 'form-options' },
-                    remainingRoles.map(r => h('div', {
-                      class: ['form-check', 'form-check--radio', currentRole === r ? 'form-check--checked' : null],
-                      role: 'radio',
-                      tabindex: '0',
-                      'aria-checked': currentRole === r ? 'true' : 'false',
-                      onClick: () => { currentRole = r; render(); },
-                    },
-                      h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
-                      h('span', { class: 'form-check__label' }, r === 'tenant' ? 'Tenant' : r === 'landlord' ? 'Landlord' : r),
-                    )),
-                  ),
-                )
-              : h('div', { class: 'banner banner--info' },
-                  h('div', { class: 'banner__icon' }, 'i'),
-                  h('div', { class: 'banner__body' },
-                    'Signing as ', h('strong', null, currentRole === 'tenant' ? 'Tenant' : 'Landlord'))),
+            roleSection,
 
             h('div', { class: 'form-group' },
               h('label', { class: 'form-label' }, 'Full name (printed) ', h('span', { class: 'form-label__required' }, '*')),
@@ -1025,27 +1079,12 @@ export async function pageSign({ params }) {
               ),
             ),
 
-            h('div', {
-              class: ['form-check', accepted ? 'form-check--checked' : null],
-              role: 'checkbox',
-              tabindex: '0',
-              'aria-checked': accepted ? 'true' : 'false',
-              onClick: () => { accepted = !accepted; render(); },
-            },
-              h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
-              h('span', { class: 'form-check__label' },
-                'I confirm the contents of this inspection are accurate and that I am the named signer.',
-              ),
-            ),
+            acceptedRow,
           ),
         ),
         bottomBar(
           h('button', { class: 'btn btn--secondary', onClick: () => navigate('/inspection/' + inspectionId) }, 'Cancel'),
-          h('button', {
-            class: 'btn btn--primary bottom-bar__primary',
-            disabled: submitting || undefined,
-            onClick: submit,
-          }, submitting ? 'Submitting…' : 'Submit signature'),
+          submitButton,
         ),
       )
     );
@@ -1056,7 +1095,13 @@ export async function pageSign({ params }) {
     if (!accepted) { toastWarning('You must accept the confirmation.'); return; }
     if (pad.isEmpty()) { toastWarning('Please draw your signature.'); return; }
 
-    submitting = true; render();
+    // Capture signature data IMMEDIATELY before any other state changes,
+    // since the canvas is the source of truth and must not be modified during submit.
+    const signatureBase64 = pad.getBase64();
+
+    submitting = true;
+    updateSubmitButton();
+
     let result;
     try {
       result = await api.saveSignature({
@@ -1064,7 +1109,7 @@ export async function pageSign({ params }) {
         signerRole: currentRole,
         signerName: signerName.trim(),
         accepted: true,
-        base64Png: pad.getBase64(),
+        base64Png: signatureBase64,
         userAgent: navigator.userAgent,
       });
       toastSuccess('Signature saved.');
@@ -1072,8 +1117,8 @@ export async function pageSign({ params }) {
       setInspectionData(data);
     } catch (e) {
       submitting = false;
+      updateSubmitButton();
       toastError(e.message || 'Signature submission failed');
-      render();
       return;
     }
 
@@ -1099,7 +1144,23 @@ export async function pageSign({ params }) {
       if (isTenant) {
         navigate(`/inspection/${inspectionId}/success`);
       } else {
-        // Admin: re-render so they can sign next role
+        // Admin: prepare UI for next role
+        const fresh = getState();
+        const validSigsNow = (fresh.signatures || []).filter(s => s.valid === true);
+        const signedRolesNow = validSigsNow.map(s => s.signerRole);
+        const remainingNow = availableRoles.filter(r => signedRolesNow.indexOf(r) < 0);
+        if (remainingNow.length === 0) {
+          navigate(`/inspection/${inspectionId}/success`);
+          return;
+        }
+        // Mutate captured remainingRoles so role section reflects new state
+        remainingRoles.length = 0;
+        remainingRoles.push(...remainingNow);
+        currentRole = remainingNow[0];
+        signerName = '';
+        accepted = false;
+        pad.clear();
+        // Full re-render is safe here — pad survives because it lives in outer closure
         render();
       }
       return;
