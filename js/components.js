@@ -106,11 +106,18 @@ export function questionCard(item, value, comment, attachments, opts) {
     inputSlot.appendChild(fresh);
   }
 
+  // Text-like inputs update natively in DOM as user types — rebuilding would
+  // destroy the element and lose focus mid-typing. Only structural controls
+  // (checkbox/radio/select/multiselect) need a manual rebuild to reflect state.
+  const TEXT_TYPES = new Set(['text', 'textarea', 'number', 'date']);
+  const needsRebuildOnChange = !TEXT_TYPES.has(item.type);
+
   function handleValueChange(newValue) {
     currentValue = newValue;
     if (opts.onChange) opts.onChange(newValue);
-    // Rebuild the input so checked/selected state is reflected visually.
-    rebuildInput();
+    if (needsRebuildOnChange) {
+      rebuildInput();
+    }
     // Update missing-required visual indicator on the card.
     const isMissingNow = item.required && (newValue === undefined || newValue === '' || newValue === null);
     cardEl.classList.toggle('question--required-missing', !!isMissingNow);
