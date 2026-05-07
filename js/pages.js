@@ -989,12 +989,14 @@ export async function pageSign({ params }) {
               ? h('div', { class: 'form-group' },
                   h('label', { class: 'form-label' }, 'Signing as'),
                   h('div', { class: 'form-options' },
-                    remainingRoles.map(r => h('label', {
+                    remainingRoles.map(r => h('div', {
                       class: ['form-check', 'form-check--radio', currentRole === r ? 'form-check--checked' : null],
-                      onClick: (e) => { e.preventDefault(); currentRole = r; render(); },
+                      role: 'radio',
+                      tabindex: '0',
+                      'aria-checked': currentRole === r ? 'true' : 'false',
+                      onClick: () => { currentRole = r; render(); },
                     },
-                      h('input', { type: 'radio', class: 'form-check__input', checked: currentRole === r }),
-                      h('span', { class: 'form-check__indicator' }),
+                      h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
                       h('span', { class: 'form-check__label' }, r === 'tenant' ? 'Tenant' : r === 'landlord' ? 'Landlord' : r),
                     )),
                   ),
@@ -1023,12 +1025,14 @@ export async function pageSign({ params }) {
               ),
             ),
 
-            h('label', {
+            h('div', {
               class: ['form-check', accepted ? 'form-check--checked' : null],
-              onClick: (e) => { e.preventDefault(); accepted = !accepted; render(); },
+              role: 'checkbox',
+              tabindex: '0',
+              'aria-checked': accepted ? 'true' : 'false',
+              onClick: () => { accepted = !accepted; render(); },
             },
-              h('input', { type: 'checkbox', class: 'form-check__input', checked: accepted }),
-              h('span', { class: 'form-check__indicator' }),
+              h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
               h('span', { class: 'form-check__label' },
                 'I confirm the contents of this inspection are accurate and that I am the named signer.',
               ),
