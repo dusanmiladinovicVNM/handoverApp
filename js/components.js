@@ -213,16 +213,25 @@ function renderInput(item, value, onChange, disabled) {
 
   if (item.type === 'checkbox') {
     const checked = value === true || value === 'true';
-    return h('label', {
+    return h('div', {
       class: ['form-check', checked ? 'form-check--checked' : null],
-      onClick: (e) => {
+      role: 'checkbox',
+      tabindex: disabled ? '-1' : '0',
+      'aria-checked': checked ? 'true' : 'false',
+      'aria-disabled': disabled ? 'true' : 'false',
+      onClick: () => {
         if (disabled) return;
-        e.preventDefault();
         handleChange(!checked);
       },
+      onKeydown: (e) => {
+        if (disabled) return;
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          handleChange(!checked);
+        }
+      },
     },
-      h('input', { type: 'checkbox', class: 'form-check__input', checked: checked, disabled: disabled || undefined }),
-      h('span', { class: 'form-check__indicator' }),
+      h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
       h('span', { class: 'form-check__label' }, item.label),
     );
   }
@@ -244,16 +253,25 @@ function renderInput(item, value, onChange, disabled) {
     return h('div', { class: 'form-options' },
       (item.options || []).map(opt => {
         const checked = value === opt.value;
-        return h('label', {
+        return h('div', {
           class: ['form-check', 'form-check--radio', checked ? 'form-check--checked' : null],
-          onClick: (e) => {
+          role: 'radio',
+          tabindex: disabled ? '-1' : '0',
+          'aria-checked': checked ? 'true' : 'false',
+          'aria-disabled': disabled ? 'true' : 'false',
+          onClick: () => {
             if (disabled) return;
-            e.preventDefault();
             handleChange(opt.value);
           },
+          onKeydown: (e) => {
+            if (disabled) return;
+            if (e.key === ' ' || e.key === 'Enter') {
+              e.preventDefault();
+              handleChange(opt.value);
+            }
+          },
         },
-          h('input', { type: 'radio', class: 'form-check__input', checked: checked, disabled: disabled || undefined }),
-          h('span', { class: 'form-check__indicator' }),
+          h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
           h('span', { class: 'form-check__label' }, opt.label),
         );
       })
@@ -269,17 +287,27 @@ function renderInput(item, value, onChange, disabled) {
     return h('div', { class: 'form-options' },
       (item.options || []).map(opt => {
         const checked = arr.indexOf(opt.value) >= 0;
-        return h('label', {
+        return h('div', {
           class: ['form-check', checked ? 'form-check--checked' : null],
-          onClick: (e) => {
+          role: 'checkbox',
+          tabindex: disabled ? '-1' : '0',
+          'aria-checked': checked ? 'true' : 'false',
+          'aria-disabled': disabled ? 'true' : 'false',
+          onClick: () => {
             if (disabled) return;
-            e.preventDefault();
             const next = checked ? arr.filter(x => x !== opt.value) : [...arr, opt.value];
             handleChange(next);
           },
+          onKeydown: (e) => {
+            if (disabled) return;
+            if (e.key === ' ' || e.key === 'Enter') {
+              e.preventDefault();
+              const next = checked ? arr.filter(x => x !== opt.value) : [...arr, opt.value];
+              handleChange(next);
+            }
+          },
         },
-          h('input', { type: 'checkbox', class: 'form-check__input', checked: checked, disabled: disabled || undefined }),
-          h('span', { class: 'form-check__indicator' }),
+          h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
           h('span', { class: 'form-check__label' }, opt.label),
         );
       })
@@ -396,7 +424,7 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
 // ============================================================
 
 /**
- * Returns { element, getDataUrl(), clear(), isEmpty() }
+ * Returns { element, getDataUrl(), getBase64(), clear(), isEmpty() }
  */
 export function signatureCanvas() {
   const canvas = document.createElement('canvas');
@@ -408,20 +436,42 @@ export function signatureCanvas() {
   let drawing = false;
   let lastPoint = null;
   let hasDrawn = false;
+  let isSetUp = false;
+  let dpr = window.devicePixelRatio || 1;
 
   function setupCanvas() {
     const rect = pad.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(rect.width * dpr);
-    canvas.height = Math.floor(240 * dpr);
-    canvas.style.width = rect.width + 'px';
-    canvas.style.height = '240px';
+    if (rect.width === 0) {
+      // Pad not yet in layout — try again next frame
+      return false;
+    }
+    const cssWidth = rect.width;
+    const cssHeight = 240;
+    canvas.width = Math.floor(cssWidth * dpr);
+    canvas.height = Math.floor(cssHeight * dpr);
+    canvas.style.width = cssWidth + 'px';
+    canvas.style.height = cssHeight + 'px';
+
     const ctx = canvas.getContext('2d');
+    // Fill with white so the resulting PNG has visible background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Now scale so all subsequent drawing uses CSS coordinates
     ctx.scale(dpr, dpr);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#1c2530';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.5;
+    isSetUp = true;
+    return true;
+  }
+
+  function ensureSetup() {
+    if (isSetUp) return;
+    if (!setupCanvas()) {
+      // Schedule retry — keep trying until pad has dimensions
+      requestAnimationFrame(ensureSetup);
+    }
   }
 
   function getPos(e) {
@@ -432,10 +482,17 @@ export function signatureCanvas() {
 
   function onStart(e) {
     e.preventDefault();
+    if (!isSetUp) setupCanvas();
     drawing = true;
     hasDrawn = true;
     hint.style.display = 'none';
     lastPoint = getPos(e);
+    // Draw a single dot in case user just taps without moving
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath();
+    ctx.arc(lastPoint.x, lastPoint.y, 1.25, 0, Math.PI * 2);
+    ctx.fillStyle = '#1c2530';
+    ctx.fill();
   }
 
   function onMove(e) {
@@ -463,22 +520,29 @@ export function signatureCanvas() {
   canvas.addEventListener('touchmove', onMove, { passive: false });
   canvas.addEventListener('touchend', onEnd);
 
-  // Set up after element is in DOM
-  requestAnimationFrame(() => {
-    if (pad.isConnected) setupCanvas();
-    else setTimeout(setupCanvas, 50);
-  });
+  // Schedule initial setup after element enters DOM
+  requestAnimationFrame(ensureSetup);
 
   return {
     element: pad,
     getDataUrl: () => canvas.toDataURL('image/png'),
     getBase64: () => {
+      // If canvas was never set up, force setup with white background
+      if (!isSetUp) setupCanvas();
       const u = canvas.toDataURL('image/png');
       return u.substring(u.indexOf(',') + 1);
     },
     clear: () => {
       const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Reset transform before clearing, then re-fill white and re-apply scale
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(dpr, dpr);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#1c2530';
+      ctx.lineWidth = 2.5;
       hasDrawn = false;
       hint.style.display = '';
     },
