@@ -1,5 +1,5 @@
 /**
- * pages.js 
+ * pages.js
  * All page renderers. Each `pageX(ctx)` writes its content into #app-root.
  *
  * Pages:
@@ -567,6 +567,15 @@ export async function pageInspectionSection({ params }) {
   const pendingItems = {};
   // Reference to the save indicator element, updated in place (not via re-render)
   let saveIndicatorEl = null;
+  // Reference to the cards container, so we can re-render only that part
+  let cardsContainer = null;
+  // Reference to the section progress display
+  let progressContainer = null;
+
+  // Pre-compute which itemIds are referenced by any visibleWhen/requiredWhen
+  // in the entire schema (cross-section refs are allowed). Only changes to
+  // these fields trigger a content re-render.
+  const triggerItemIds = collectTriggerFieldIds(getState().schema);
 
   function updateSaveIndicator() {
     if (!saveIndicatorEl) return;
@@ -588,11 +597,17 @@ export async function pageInspectionSection({ params }) {
         updateSaveIndicator();
       })
       .catch((e) => {
+        console.error('[saveSection] failed', {
+          code: e.code,
+          message: e.message,
+          details: e.details,
+          itemsSent: itemsToSend,
+        });
         setState({ saveStatus: 'error', saveError: e.message });
         updateSaveIndicator();
         // Re-add pending items if save failed
         Object.assign(pendingItems, itemsToSend);
-        toastError('Save failed. Will retry.');
+        toastError('Save failed: ' + (e.code || 'unknown') + ' — ' + (e.message || ''));
       });
   }
 
@@ -615,7 +630,8 @@ export async function pageInspectionSection({ params }) {
   };
   window.addEventListener('beforeunload', onBeforeUnload);
 
-  function render() {
+  /** Build the list of question cards + progress bar for current state. */
+  function buildContent() {
     const cur = getState();
     const insp = cur.inspection;
     const sectionAnswers = cur.answers[sectionId] || {};
@@ -634,16 +650,50 @@ export async function pageInspectionSection({ params }) {
         inspectionId,
         sectionId,
         onChange: (newValue) => {
-          // Update local state silently (no re-render — input keeps focus)
           patchAnswer(sectionId, item.id, { value: newValue });
           queueChange(item.id, { value: newValue });
+          // Only re-render content if this field is referenced by some condition.
+          // Plain text fields are never triggers → no re-render → input keeps focus.
+          if (triggerItemIds.has(item.id)) {
+            rebuildContent();
+          }
         },
         onCommentChange: (comment) => {
           patchAnswer(sectionId, item.id, { comment });
           queueChange(item.id, { comment });
+          // Comments are never triggers; no re-render.
         },
       });
     });
+
+    return { cards, progress: sp };
+  }
+
+  /** Replace cards container and progress with fresh content. Keeps header/footer. */
+  function rebuildContent() {
+    if (!cardsContainer || !progressContainer) return;
+    const { cards, progress: sp } = buildContent();
+
+    // Replace cards
+    const newCards = h('div', { class: 'cards-wrapper' }, cards);
+    cardsContainer.replaceWith(newCards);
+    cardsContainer = newCards;
+
+    // Replace progress bar (it's inside the same wrapper)
+    const newProgress = h('div', { class: 'flex items-center gap-3' },
+      h('div', { style: { flex: '1' } },
+        progressBar(sp.completedVisible, sp.totalVisible || 1)),
+      h('span', { class: 'text-xs text-muted' },
+        sp.completedVisible, '/', sp.totalVisible),
+    );
+    progressContainer.replaceWith(newProgress);
+    progressContainer = newProgress;
+  }
+
+  function render() {
+    const cur = getState();
+    const insp = cur.inspection;
+    const { cards, progress: sp } = buildContent();
 
     // Find next section for "Next" navigation
     const sections = cur.schema.sections || [];
@@ -651,6 +701,13 @@ export async function pageInspectionSection({ params }) {
     const nextSection = idx >= 0 && idx < sections.length - 1 ? sections[idx + 1] : null;
 
     saveIndicatorEl = saveIndicator(cur.saveStatus, cur.saveError);
+    progressContainer = h('div', { class: 'flex items-center gap-3' },
+      h('div', { style: { flex: '1' } },
+        progressBar(sp.completedVisible, sp.totalVisible || 1)),
+      h('span', { class: 'text-xs text-muted' },
+        sp.completedVisible, '/', sp.totalVisible),
+    );
+    cardsContainer = h('div', { class: 'cards-wrapper' }, cards);
 
     mount(root(),
       h('div', { class: 'app-layout' },
@@ -666,15 +723,8 @@ export async function pageInspectionSection({ params }) {
         h('main', { class: 'app-body app-body--has-bottom-bar' },
           h('div', { class: 'page' },
             section.description ? h('p', { class: 'text-muted text-sm' }, section.description) : null,
-
-            h('div', { class: 'flex items-center gap-3' },
-              h('div', { style: { flex: '1' } },
-                progressBar(sp.completedVisible, sp.totalVisible || 1)),
-              h('span', { class: 'text-xs text-muted' },
-                sp.completedVisible, '/', sp.totalVisible),
-            ),
-
-            cards,
+            progressContainer,
+            cardsContainer,
           ),
         ),
         bottomBar(
@@ -713,6 +763,28 @@ export async function pageInspectionSection({ params }) {
     window.removeEventListener('beforeunload', onBeforeUnload);
     flushSave();
   };
+}
+
+/**
+ * Walk the schema and collect every itemId referenced inside any
+ * visibleWhen / requiredWhen condition. These are the "trigger" fields
+ * whose change must cause a content re-render.
+ */
+function collectTriggerFieldIds(schema) {
+  const triggers = new Set();
+  function walk(condition) {
+    if (!condition) return;
+    if (condition.all) condition.all.forEach(walk);
+    if (condition.any) condition.any.forEach(walk);
+    if (condition.field) triggers.add(condition.field);
+  }
+  for (const section of (schema.sections || [])) {
+    for (const item of (section.items || [])) {
+      walk(item.visibleWhen);
+      walk(item.requiredWhen);
+    }
+  }
+  return triggers;
 }
 
 // ============================================================
@@ -981,8 +1053,9 @@ export async function pageSign({ params }) {
     if (pad.isEmpty()) { toastWarning('Please draw your signature.'); return; }
 
     submitting = true; render();
+    let result;
     try {
-      const result = await api.saveSignature({
+      result = await api.saveSignature({
         inspectionId,
         signerRole: currentRole,
         signerName: signerName.trim(),
@@ -991,30 +1064,45 @@ export async function pageSign({ params }) {
         userAgent: navigator.userAgent,
       });
       toastSuccess('Signature saved.');
-      // Reload state and navigate
       const data = await api.getInspection(inspectionId);
       setInspectionData(data);
-
-      if (result.allRequiredSignaturesCollected) {
-        // If admin, go straight to finalize prompt
-        if (isAdmin) {
-          await offerFinalize(inspectionId);
-        } else {
-          navigate(`/inspection/${inspectionId}/success`);
-        }
-      } else {
-        // More signatures needed
-        if (isTenant) {
-          navigate(`/inspection/${inspectionId}/success`);
-        } else {
-          render();
-        }
-      }
     } catch (e) {
-      toastError(e.message);
-    } finally {
       submitting = false;
+      toastError(e.message || 'Signature submission failed');
+      render();
+      return;
     }
+
+    // Always reset submitting before next step
+    submitting = false;
+
+    // Determine next step based on FRESH state (not stale result flag)
+    const freshState = getState();
+    const newStatus = freshState.inspection.status;
+
+    if (newStatus === 'signed') {
+      // All signatures collected
+      if (isAdmin) {
+        await offerFinalize(inspectionId);
+      } else {
+        navigate(`/inspection/${inspectionId}/success`);
+      }
+      return;
+    }
+
+    if (newStatus === 'partially_signed') {
+      // More signatures still needed
+      if (isTenant) {
+        navigate(`/inspection/${inspectionId}/success`);
+      } else {
+        // Admin: re-render so they can sign next role
+        render();
+      }
+      return;
+    }
+
+    // Defensive fallback — unexpected status, just go to inspection home
+    navigate(`/inspection/${inspectionId}`);
   }
 
   render();
