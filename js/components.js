@@ -92,9 +92,38 @@ export function saveIndicator(status, errorText) {
  */
 export function questionCard(item, value, comment, attachments, opts) {
   const disabled = opts.disabled === true;
-  const isMissing = item.required && (value === undefined || value === '' || value === null);
 
-  const inputEl = renderInput(item, value, opts.onChange, disabled);
+  // Track current value/comment locally so input rebuilds reflect them.
+  let currentValue = value;
+  let currentComment = comment;
+
+  // Wrapper that holds the input — we replace its contents when value changes.
+  const inputSlot = h('div', { class: 'question__input-slot' });
+
+  function rebuildInput() {
+    const fresh = renderInput(item, currentValue, handleValueChange, disabled);
+    inputSlot.innerHTML = '';
+    inputSlot.appendChild(fresh);
+  }
+
+  function handleValueChange(newValue) {
+    currentValue = newValue;
+    if (opts.onChange) opts.onChange(newValue);
+    // Rebuild the input so checked/selected state is reflected visually.
+    rebuildInput();
+    // Update missing-required visual indicator on the card.
+    const isMissingNow = item.required && (newValue === undefined || newValue === '' || newValue === null);
+    cardEl.classList.toggle('question--required-missing', !!isMissingNow);
+  }
+
+  function handleCommentChange(newComment) {
+    currentComment = newComment;
+    if (opts.onCommentChange) opts.onCommentChange(newComment);
+  }
+
+  rebuildInput();
+
+  const isMissing = item.required && (value === undefined || value === '' || value === null);
 
   // Comment toggle (collapsed by default unless comment exists)
   let commentVisible = !!comment;
@@ -107,8 +136,8 @@ export function questionCard(item, value, comment, attachments, opts) {
         class: 'form-textarea',
         placeholder: 'Add a note',
         disabled: disabled || undefined,
-        onInput: (e) => opts.onCommentChange && opts.onCommentChange(e.target.value),
-      }, comment || '');
+        onInput: (e) => handleCommentChange(e.target.value),
+      }, currentComment || '');
       return commentNode;
     }
     return null;
@@ -135,7 +164,7 @@ export function questionCard(item, value, comment, attachments, opts) {
   );
   const attachmentsEnabled = item.attachments && item.attachments.enabled;
 
-  return h('div', { class: ['question', isMissing ? 'question--required-missing' : null] },
+  const cardEl = h('div', { class: ['question', isMissing ? 'question--required-missing' : null] },
     // Label
     h('div', { class: 'question__label' },
       h('span', null, item.label),
@@ -144,7 +173,7 @@ export function questionCard(item, value, comment, attachments, opts) {
     item.help ? h('p', { class: 'question__help' }, item.help) : null,
 
     // Input
-    inputEl,
+    inputSlot,
 
     // Comment
     toggleNode,
@@ -165,6 +194,8 @@ export function questionCard(item, value, comment, attachments, opts) {
         })
       : null,
   );
+
+  return cardEl;
 }
 
 function renderInput(item, value, onChange, disabled) {
