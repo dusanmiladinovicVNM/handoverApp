@@ -42,8 +42,18 @@ function bootstrapSheet() {
  * picks up keys added later — it would silently run on code defaults while the
  * sheet that is meant to be the editable source of truth stays incomplete.
  */
-function _seedMissingConfigKeys(ss) {
-  const defaults = [
+/**
+ * Every key the code reads from the Config sheet, with the value it falls back
+ * to when the sheet does not answer.
+ *
+ * One table, used both to seed a new installation and to check an existing one.
+ * Two tables would drift, and the drift is exactly the fault worth catching:
+ * this installation ran for weeks with authCacheTtlSeconds at 60 because the
+ * code default was raised to 21600 and the sheet row, written earlier, was
+ * never revisited.
+ */
+function CONFIG_DEFAULTS() {
+  return [
     ['defaultTokenTtlHours', '168', 'Tenant link expiry hours (default 7 days)'],
     ['maxAttachmentsPerItem', '5', 'Max photos per item'],
     ['maxAttachmentsPerInspection', '80', 'Max photos per inspection'],
@@ -60,6 +70,10 @@ function _seedMissingConfigKeys(ss) {
     ['authCacheTtlSeconds', '21600', 'How long a mirrored user or device row is trusted; revocation through the app is immediate regardless. 0 disables mirroring'],
     ['slowRequestMs', '5000', 'Requests slower than this record their timing in AuditLog; 0 logs all'],
   ];
+}
+
+function _seedMissingConfigKeys(ss) {
+  const defaults = CONFIG_DEFAULTS();
 
   const sheet = ss.getSheetByName('Config');
   const existing = {};
@@ -136,6 +150,77 @@ function loadInitialSchemas() {
     Logger.log(`Loaded schema: ${seed.schemaId}`);
   }
   Logger.log('Schemas loaded.');
+}
+
+/**
+ * Read the Config sheet and say what is wrong with it.
+ *
+ * Report only — nothing is written. A value that differs from the default is
+ * usually deliberate, and silently "correcting" a deployment's tuning would be
+ * worse than the faults this looks for.
+ *
+ * It looks for three things, all of which this installation had at once and
+ * none of which was visible from the app:
+ *
+ *   missing     the key is not in the sheet, so the code default applies. New
+ *               keys arrive this way; bootstrapSheet() adds them.
+ *   unusable    there is a value and it is not a number, so the default applies
+ *               anyway — a setting that looks configured but is not.
+ *   stale       the value is a number but predates a change to the default. Not
+ *               an error, and the reason it is listed rather than fixed.
+ */
+function checkConfig() {
+  const defaults = CONFIG_DEFAULTS();
+  const rows = SheetService.getConfigRows();
+
+  const inSheet = {};
+  rows.forEach(r => { if (r.key) inSheet[String(r.key)] = String(r.value); });
+
+  const missing = [];
+  const unusable = [];
+  const differing = [];
+
+  defaults.forEach(function (entry) {
+    const key = entry[0];
+    const fallback = entry[1];
+
+    if (!(key in inSheet) || inSheet[key] === '') {
+      missing.push(`${key}  (code default: ${fallback})`);
+      return;
+    }
+
+    const value = inSheet[key];
+    const numericDefault = !isNaN(Number(fallback));
+    if (numericDefault && isNaN(Number(value))) {
+      unusable.push(`${key} = "${value}"  → falling back to ${fallback}`);
+      return;
+    }
+    if (value !== fallback) {
+      differing.push(`${key} = ${value}  (code default: ${fallback})`);
+    }
+  });
+
+  const known = {};
+  defaults.forEach(d => { known[d[0]] = true; });
+  const unread = Object.keys(inSheet).filter(k => !known[k]);
+
+  Logger.log('=== Config sheet ===');
+  _logConfigGroup('Missing — the code default applies. Run bootstrapSheet() to add them.', missing);
+  _logConfigGroup('Unusable — a value is set but cannot be read. Fix these.', unusable);
+  _logConfigGroup('Read by nothing — a typo, or a key the code stopped using.', unread);
+  _logConfigGroup('Differing from the default — check each is still what you meant.', differing);
+
+  if (!missing.length && !unusable.length && !unread.length) {
+    Logger.log('Nothing wrong. Values differing from the defaults are listed above, if any.');
+  }
+  return { missing: missing, unusable: unusable, unread: unread, differing: differing };
+}
+
+function _logConfigGroup(title, items) {
+  if (!items.length) return;
+  Logger.log('');
+  Logger.log(title);
+  items.forEach(i => Logger.log(`  · ${i}`));
 }
 
 /**
@@ -345,6 +430,16 @@ function smokeTest() {
   });
   check('Schemas loaded', () => {
     if (SheetService.getActiveSchemas().length === 0) throw new Error('no schemas');
+  });
+  // Missing keys and stale values are not failures — the code default applies
+  // and the app runs. A value that is set but cannot be read is a failure: it
+  // looks configured and is not, which is how passwordMinLength sat holding the
+  // word "passwordMinLength" without anyone noticing.
+  check('Config sheet usable', () => {
+    const report = checkConfig();
+    if (report.unusable.length) {
+      throw new Error(`${report.unusable.length} unusable value(s) — run checkConfig()`);
+    }
   });
   check('Tenant token roundtrip', () => {
     const nonce = Utils.generateNonce();
