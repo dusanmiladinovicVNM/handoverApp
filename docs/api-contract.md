@@ -66,6 +66,19 @@ answers identically whether or not the account exists.
 | `requireStaff` | any signed-in account — admin or inspector |
 | `requireAdmin` | `role: admin` only |
 | `requireMatchingInspection` | a tenant token, bound to its own inspection |
+| `requireInspectionAccess` | admin: any inspection · inspector: the ones assigned to them · tenant: the one its link was issued for |
+
+`requireStaff` says the caller may work; `requireInspectionAccess` says on
+*what*. Every action that names an `inspectionId` calls the second one, and an
+action gated only on `requireStaff` is one that names no inspection.
+
+An inspector asking for an inspection that is not theirs is answered
+`NOT_FOUND`, identically to one that does not exist. Inspection ids run in
+sequence, so a distinguishable refusal would let any account walk the range and
+count the work in progress.
+
+An inspection with an empty `assignedTo` belongs to no inspector and is visible
+only to admins until someone assigns it.
 
 ### Failure response
 ```json
@@ -103,12 +116,114 @@ answers identically whether or not the account exists.
 
 ---
 
-## Endpoints
+## Endpoints — accounts and sessions
+
+A `user` object anywhere below is the public projection: `userId`, `email`,
+`name`, `role`, `status`, `hasPassword`, `lastLoginAt`, `lockedUntil`,
+`createdAt`, `createdBy`, `disabledAt`, `disabledBy`, `notes`. It never carries
+the password hash.
+
+### `login`
+**Auth:** public. **Data:** `email`, `password`, and optionally `remember`
+(boolean), `deviceLabel`, `userAgent`.
+
+```json
+{ "ok": true, "data": {
+  "sessionToken": "<token>", "user": { ... }, "expiresInHours": 12,
+  "deviceToken": "<token>", "deviceExpiresInDays": 60
+} }
+```
+
+`deviceToken` and `deviceExpiresInDays` appear only when `remember` is true.
+Without it the device is registered for the session's lifetime and forgotten
+after.
+
+Failure is always the same message whether the address is unknown, the account
+is disabled, or the password is wrong — and an unknown address costs the same
+time as a known one, so the two cannot be told apart by the clock. After
+`loginMaxFailures` attempts the account locks for `loginLockMinutes`.
+
+### `refreshSession`
+**Auth:** public — the device token is in `data`, not in the auth block, because
+a device token is never accepted as a session.
+
+**Data:** `deviceToken`. **Returns:** `sessionToken`, `user`, `expiresInHours`.
+
+### `setPassword`
+**Auth:** public — the set-password token *is* the credential.
+
+**Data:** `token`, `password`, optionally `deviceLabel`, `userAgent`. Returns a
+session, as `login` does: the link that sets a password also signs you in.
+
+The token is single-use, and nothing has to be stored to make it so — it is
+derived from the password hash it is about to replace, so setting the password
+invalidates it.
+
+### `requestPasswordReset`
+**Auth:** public. **Data:** `email`.
+
+```json
+{ "ok": true, "data": { "sent": true, "message": "If that address belongs to an account, a link is on its way." } }
+```
+
+Always that answer, whether or not the address belongs to an account.
+
+### `changePassword`
+**Auth:** the account holder. **Data:** `oldPassword`, `newPassword`.
+
+**Returns:** `{ "signedOut": true, "devicesRevoked": <n> }` — changing a
+password signs out every other device, which is the point of changing it.
+
+### `me`
+**Auth:** staff. **Returns:** `{ "user": { ... } }`, read from the sheet, not
+from the token.
+
+### `signOut`
+**Auth:** staff. Revokes the calling device. **Returns:** `{ "signedOut": true }`.
+
+---
+
+## Endpoints — account administration
+
+All admin only. Each returns the updated `user` where one is affected.
+
+| Action | Data | Returns |
+|---|---|---|
+| `listUsers` | — | `users[]`, `activeAdmins` |
+| `createUser` | `name`, `email`, `role` | `user`, `delivery` |
+| `setUserStatus` | `userId`, `status` | `user`, `devicesRevoked` |
+| `setUserRole` | `userId`, `role` | `user` |
+| `unlockUser` | `userId` | `user` |
+| `sendPasswordLink` | `userId` | `delivery` |
+| `listUserDevices` | `userId` | `devices[]` |
+| `revokeDevice` | `deviceId` | `{ revoked: true }` |
+| `revokeAllDevices` | `userId` | `{ revoked: <n> }` |
+| `getAuthLog` | `userId`, optional `limit` (default 200) | `events[]` |
+| `assignInspection` | `inspectionId`, `assignedTo` | `inspectionId`, `assignedTo` |
+
+`delivery` reports whether the set-password mail actually went out, and
+distinguishes a missing scope from a spent quota — a new account whose invitation
+never arrived is otherwise indistinguishable from one that was never created.
+
+Disabling an account (`setUserStatus`) revokes its devices, so the sessions it
+already had stop working rather than running out on their own.
+
+Two guards refuse rather than let the screen paint itself into a corner. Nobody
+can disable their own account or remove their own admin rights, and the last
+active administrator cannot be disabled or demoted by anyone — the workbook
+would be left with no way back in.
+
+`assignInspection` moves an inspection between inspectors, which takes it away
+from whoever had it — see the visibility rules above.
+
+---
+
+## Endpoints — inspections
 
 ### `getSchemas`
 List all active schemas. Used on inspection creation form.
 
-**Auth:** internal only.
+**Auth:** staff.
 
 **Request:**
 ```json
@@ -133,7 +248,9 @@ List all active schemas. Used on inspection creation form.
 ### `getSchema`
 Fetch full schema JSON.
 
-**Auth:** any authenticated.
+**Auth:** staff. It used to accept any valid token, which let a tenant link pull
+any schema by id. A tenant already receives the schema for their own inspection
+inside `getInspection` and has no use for the others.
 
 **Request:**
 ```json
@@ -156,7 +273,8 @@ Fetch full schema JSON.
 ### `createInspection`
 Create new inspection. Returns inspectionId and tenant token.
 
-**Auth:** internal only.
+**Auth:** staff. An inspector may create one, but `assignedTo` is forced to
+their own address — only an admin may open a job on someone else's behalf.
 
 **Request:**
 ```json
@@ -202,7 +320,8 @@ Create new inspection. Returns inspectionId and tenant token.
 ### `getInspection`
 Fetch full inspection state: metadata + answers + attachments + signatures + schema.
 
-**Auth:** any authenticated. Tenant token must match this `inspectionId`.
+**Auth:** `requireInspectionAccess` — admin, the assigned inspector, or the
+tenant token issued for this inspection.
 
 **Request:**
 ```json
@@ -224,7 +343,9 @@ Fetch full inspection state: metadata + answers + attachments + signatures + sch
       "createdAt": "...",
       "updatedAt": "...",
       "lockedAt": null,
-      "signedAt": null
+      "signedAt": null,
+      "assignedTo": "mina@firma.rs",
+      "assignedToName": "Mina Ilić"
     },
     "schema": { "schemaVersion": 1, "sections": [...] },
     "answers": {
@@ -242,12 +363,15 @@ Fetch full inspection state: metadata + answers + attachments + signatures + sch
 }
 ```
 
+A non-admin caller — inspector or tenant — does not receive
+`tenantTokenHash`, `currentNonce` or `createdBy`.
+
 ---
 
 ### `saveSection`
 Upsert answers for one section. Idempotent.
 
-**Auth:** internal or tenant token (if write allowed by status).
+**Auth:** `requireInspectionAccess`, and the status must still allow writes.
 
 **Request:**
 ```json
@@ -283,7 +407,7 @@ Upsert answers for one section. Idempotent.
 ### `uploadAttachment`
 Upload one photo. Image is base64-encoded in body.
 
-**Auth:** internal or tenant (if allowed).
+**Auth:** `requireInspectionAccess`, and the status must still allow writes.
 
 **Request:**
 ```json
@@ -326,7 +450,7 @@ Upload one photo. Image is base64-encoded in body.
 ### `deleteAttachment`
 Soft delete (sets `deleted = TRUE`, moves file to `_deleted` folder).
 
-**Auth:** internal only (tenant cannot delete).
+**Auth:** staff, plus `requireInspectionAccess`. A tenant cannot delete.
 
 **Request:**
 ```json
@@ -343,7 +467,7 @@ Soft delete (sets `deleted = TRUE`, moves file to `_deleted` folder).
 ### `lockInspection`
 Transition `draft`/`under_review` → `locked_for_signature`. Validates all required fields are answered.
 
-**Auth:** internal only.
+**Auth:** staff, plus `requireInspectionAccess`.
 
 **Request:**
 ```json
@@ -377,7 +501,7 @@ Transition `draft`/`under_review` → `locked_for_signature`. Validates all requ
 ### `unlockInspection`
 Transition `locked_for_signature`/`partially_signed` → `draft`. Invalidates all existing signatures.
 
-**Auth:** internal only.
+**Auth:** admin only. Reopening a signed inspection is supervisory.
 
 **Request:**
 ```json
@@ -403,7 +527,8 @@ Transition `locked_for_signature`/`partially_signed` → `draft`. Invalidates al
 ### `saveSignature`
 Save one signature. Multiple calls expected (one per signer).
 
-**Auth:** internal or tenant token (only matching role).
+**Auth:** `requireInspectionAccess`, plus `requireMatchingRole` — a tenant token
+may only sign as `tenant`.
 
 **Request:**
 ```json
@@ -441,7 +566,7 @@ Save one signature. Multiple calls expected (one per signer).
 ### `regenerateTenantToken`
 Issue a fresh tenant link (e.g., previous one expired or got compromised). Increments nonce — invalidates old token.
 
-**Auth:** internal only.
+**Auth:** staff, plus `requireInspectionAccess`.
 
 **Request:**
 ```json
@@ -465,7 +590,7 @@ Issue a fresh tenant link (e.g., previous one expired or got compromised). Incre
 ### `finalizeInspection`
 Generate final PDF. Idempotent — calling twice generates fresh PDF replacing old.
 
-**Auth:** internal only.
+**Auth:** staff, plus `requireInspectionAccess`.
 
 **Request:**
 ```json
@@ -494,9 +619,15 @@ Generate final PDF. Idempotent — calling twice generates fresh PDF replacing o
 ---
 
 ### `listInspections`
-Admin dashboard list. Supports filter and pagination.
+The main list. Supports filter and pagination.
 
-**Auth:** internal only.
+`assignedTo` is the stored address and is the identity; `assignedToName` rides
+alongside it for display, resolved server-side because an inspector cannot look
+up who an address belongs to. It is empty when no account matches the address
+any more.
+
+**Auth:** staff. An inspector's list, and its `totalCount`, contain only the
+inspections assigned to them.
 
 **Request:**
 ```json
@@ -525,7 +656,13 @@ Admin dashboard list. Supports filter and pagination.
   "ok": true,
   "data": {
     "inspections": [
-      { "inspectionId": "INS-...", "status": "draft", "inspectionType": "move_in", "propertyAddress": "...", "tenantName": "...", "updatedAt": "..." }
+      {
+        "inspectionId": "INS-...", "status": "draft", "inspectionType": "move_in",
+        "propertyAddress": "...", "propertyUnit": "4B",
+        "landlordName": "...", "tenantName": "...",
+        "createdAt": "...", "updatedAt": "...",
+        "assignedTo": "mina@firma.rs", "assignedToName": "Mina Ilić"
+      }
     ],
     "totalCount": 142,
     "page": 0,
@@ -539,7 +676,7 @@ Admin dashboard list. Supports filter and pagination.
 ### `getAuditLog`
 Per-inspection event history.
 
-**Auth:** internal only.
+**Auth:** admin only.
 
 **Request:**
 ```json
@@ -563,24 +700,36 @@ Per-inspection event history.
 
 ## Permissions Matrix
 
-| Action | Admin | Internal Staff | Tenant Token |
-|---|---|---|---|
-| `getSchemas` | ✓ | ✓ | ✗ |
-| `getSchema` | ✓ | ✓ | ✓ (only schema of own inspection) |
-| `createInspection` | ✓ | ✓ | ✗ |
-| `getInspection` | ✓ | ✓ | ✓ (only own) |
-| `saveSection` | ✓ | ✓ | ✓ (if status allows, only own) |
-| `uploadAttachment` | ✓ | ✓ | ✓ (if status allows, only own) |
-| `deleteAttachment` | ✓ | ✓ | ✗ |
-| `lockInspection` | ✓ | ✓ | ✗ |
-| `unlockInspection` | ✓ | ✓ | ✗ |
-| `saveSignature` (own role) | ✓ | ✓ | ✓ (only as `tenant`) |
-| `regenerateTenantToken` | ✓ | ✓ | ✗ |
-| `finalizeInspection` | ✓ | ✓ | ✗ |
-| `listInspections` | ✓ | ✓ | ✗ |
-| `getAuditLog` | ✓ | ✓ | ✗ |
+"Own" below means the same thing in every row: for an inspector, assigned to
+them; for a tenant token, the inspection the link was issued for.
 
-For MVP: **all internal staff have admin rights**. Granular roles can be added later by reading per-email roles from Config.
+| Action | Admin | Inspector | Tenant Token |
+|---|---|---|---|
+| `login`, `requestPasswordReset`, `setPassword`, `refreshSession` | — public — | — public — | — public — |
+| `me`, `signOut`, `changePassword` | ✓ | ✓ | ✗ |
+| `listUsers`, `createUser`, `setUserStatus`, `setUserRole` | ✓ | ✗ | ✗ |
+| `unlockUser`, `sendPasswordLink` | ✓ | ✗ | ✗ |
+| `listUserDevices`, `revokeDevice`, `revokeAllDevices` | ✓ | ✗ | ✗ |
+| `getAuthLog`, `assignInspection` | ✓ | ✗ | ✗ |
+| `getSchemas` | ✓ | ✓ | ✗ |
+| `getSchema` | ✓ | ✓ | ✗ |
+| `createInspection` | ✓ | ✓ (always assigned to themselves) | ✗ |
+| `listInspections` | ✓ (all) | ✓ (own only) | ✗ |
+| `getInspection` | ✓ | ✓ (own) | ✓ (own) |
+| `saveSection` | ✓ | ✓ (own) | ✓ (if status allows, own) |
+| `uploadAttachment` | ✓ | ✓ (own) | ✓ (if status allows, own) |
+| `deleteAttachment` | ✓ | ✓ (own) | ✗ |
+| `lockInspection` | ✓ | ✓ (own) | ✗ |
+| `unlockInspection` | ✓ | ✗ | ✗ |
+| `saveSignature` | ✓ | ✓ (own) | ✓ (only as `tenant`) |
+| `regenerateTenantToken` | ✓ | ✓ (own) | ✗ |
+| `finalizeInspection` | ✓ | ✓ (own) | ✗ |
+| `getAuditLog` | ✓ | ✗ | ✗ |
+
+What stays admin-only is supervisory rather than operational: reopening a signed
+inspection, reading the audit log, managing accounts, and deciding who an
+inspection belongs to. Everything an inspector needs to carry out and finish
+the fieldwork they were given, they can do.
 
 ---
 
