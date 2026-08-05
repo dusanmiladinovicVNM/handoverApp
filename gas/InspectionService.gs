@@ -145,6 +145,16 @@ const InspectionService = (function () {
       valid: s.valid,
     }));
 
+    // Display name for the assignee, resolved here so the client never has to
+    // ask who an address belongs to — which it could not do anyway without
+    // admin rights.
+    if (inspection.assignedTo) {
+      const assignee = UserService.getByEmail(inspection.assignedTo);
+      inspection.assignedToName = assignee ? assignee.name : '';
+    } else {
+      inspection.assignedToName = '';
+    }
+
     return {
       inspection,
       schema: schemaJson,
@@ -346,6 +356,14 @@ const InspectionService = (function () {
     const start = page * pageSize;
     const slice = all.slice(start, start + pageSize);
 
+    // One pass over the users to turn stored addresses into names. Looking each
+    // one up individually would be a sheet read per row on a cold cache; the
+    // whole list is a single read.
+    const nameByEmail = {};
+    UserService.listAll().forEach(u => {
+      nameByEmail[String(u.email).toLowerCase()] = u.name;
+    });
+
     const projected = slice.map(i => ({
       inspectionId: i.inspectionId,
       status: i.status,
@@ -356,7 +374,10 @@ const InspectionService = (function () {
       tenantName: i.tenantName,
       createdAt: i.createdAt,
       updatedAt: i.updatedAt,
+      // The address stays the stored value — it is the identity, and names
+      // change. The name rides alongside it, for display only.
       assignedTo: i.assignedTo || '',
+      assignedToName: nameByEmail[String(i.assignedTo || '').toLowerCase()] || '',
     }));
 
     return {

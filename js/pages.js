@@ -1030,7 +1030,8 @@ export function pageAdminList() {
                         // contain nothing but their own work, where repeating
                         // their name on every row says nothing.
                         isAdmin() && i.assignedTo
-                          ? h('div', { class: 'list-item__meta' }, 'Assigned to ', i.assignedTo)
+                          ? h('div', { class: 'list-item__meta' },
+                              'Assigned to ', i.assignedToName || i.assignedTo)
                           : null,
                         h('div', { class: 'list-item__meta text-mono' }, i.inspectionId),
                       ))
@@ -1231,7 +1232,7 @@ export function pageAdminNew() {
                           onChange: (e) => { form.assignedTo = e.target.value; },
                         },
                           h('option', { value: '' }, 'Me'),
-                          assignableUsers.map(u => h('option', { value: u.email }, `${u.name} (${u.email})`)),
+                          assignableUsers.map(u => h('option', { value: u.email }, u.name)),
                         ),
                         h('p', { class: 'form-hint text-xs text-muted' },
                           'Who will carry out this inspection. Can be changed later.'),
@@ -2232,7 +2233,10 @@ export async function pageAdminDetail({ params }) {
                 h('div', null, h('strong', null, 'Created: '), formatDate(i.createdAt), ' by ', i.createdBy || 'unknown'),
                 h('div', null,
                   h('strong', null, 'Assigned to: '),
-                  i.assignedTo || h('span', { class: 'text-muted' }, 'nobody'),
+                  // Falls back to the address when no account matches it any
+                  // more — a deleted user should show as something, not blank.
+                  i.assignedToName || i.assignedTo
+                    || h('span', { class: 'text-muted' }, 'nobody'),
                   isAdmin()
                     ? h('button', {
                         class: 'btn btn--sm btn--ghost',
