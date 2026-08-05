@@ -89,12 +89,16 @@ module.exports = function run() {
 
   section('Routing table:');
 
-  const ctx = vm.createContext(buildLoadTimeGlobals());
+  const globals = buildLoadTimeGlobals();
+  const logLines = [];
+  globals.Logger = { log: (line) => logLines.push(String(line)) };
+
+  const ctx = vm.createContext(globals);
   files.forEach(f =>
     vm.runInContext(fs.readFileSync(path.join(GAS_DIR, f), 'utf8'), ctx, { filename: f }));
   vm.runInContext(
-    'globalThis.__exports = { Router, PUBLIC_ACTIONS };', ctx);
-  const { Router, PUBLIC_ACTIONS } = ctx.__exports;
+    'globalThis.__exports = { Router, PUBLIC_ACTIONS, verifyDeployment };', ctx);
+  const { Router, PUBLIC_ACTIONS, verifyDeployment } = ctx.__exports;
 
   check('the routing table is readable once everything has loaded', () => {
     const actions = Router.listActions();
@@ -115,5 +119,39 @@ module.exports = function run() {
     const unexpected = PUBLIC_ACTIONS.filter(a => expected.indexOf(a) < 0);
     assert(unexpected.length === 0,
       `these actions run without authentication and should not: ${unexpected.join(', ')}`);
+  });
+
+  section('The deployment self-check:');
+
+  // verifyDeployment() is what an operator runs after copying files by hand, so
+  // it names services and methods in a hand-written list. That list can rot
+  // exactly like any other duplicated knowledge — and a check that quietly
+  // stopped matching the code would be worse than no check, because it reports
+  // success. Running it against the real files is what keeps it honest.
+  check('verifyDeployment agrees with the code it checks', () => {
+    logLines.length = 0;
+    verifyDeployment();
+    const output = logLines.join('\n');
+    assert(/All \d+ services present and complete/.test(output),
+      `verifyDeployment reported problems against a complete checkout:\n${output}`);
+  });
+
+  check('it notices a service that is missing a method', () => {
+    // Simulate the half of a bad paste that loads cleanly: the file is there,
+    // but truncated. This is the failure verifyDeployment exists to catch.
+    ctx.__saved = vm.runInContext('AccountService.login', ctx);
+    vm.runInContext('AccountService.login = undefined;', ctx);
+    logLines.length = 0;
+    try {
+      verifyDeployment();
+    } finally {
+      vm.runInContext(
+        'AccountService.login = globalThis.__saved; delete globalThis.__saved;', ctx);
+    }
+
+    const output = logLines.join('\n');
+    assert(/AccountService is incomplete/.test(output),
+      `a truncated service went unreported:\n${output}`);
+    assert(/missing: login/.test(output), 'the missing method was not named');
   });
 };

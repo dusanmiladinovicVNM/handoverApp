@@ -218,6 +218,147 @@ function revokeAdminTokenByNonce(nonce) {
 }
 
 /**
+ * Verify that every service made it into the project intact.
+ *
+ * Run this after copying files by hand. Files are moved one at a time, and a
+ * paste into the wrong one both duplicates its content and silently destroys
+ * whatever it landed on. A duplicate is loud — the project stops loading — but
+ * the destroyed half is quiet: everything runs until the missing service is
+ * finally called, which may be days later and in front of a customer.
+ *
+ * File *names* are irrelevant to Apps Script; only the declarations matter. So
+ * this checks the declarations, not the file list.
+ *
+ * The identifiers are referenced through arrow functions on purpose: a top
+ * level `const` is lexical and never becomes a property of the global object,
+ * so it cannot be looked up by name — but referencing it directly throws
+ * ReferenceError when it is missing, which is exactly the signal wanted.
+ */
+function verifyDeployment() {
+  const SERVICES = [
+    ['Utils', () => Utils, ['nowIso', 'secureRandomHex', 'secureRandomBytes',
+      'safeEqual', 'safeEqualBytes', 'toByteArray', 'generateUserId',
+      'generateDeviceId', 'generateInspectionId', 'hmacSha256', 'sha256']],
+    ['Config', () => Config, ['getWorkbookId', 'getTokenSecret', 'getFrontendUrl',
+      'getPbkdf2Iterations', 'getPasswordMinLength', 'getSessionTtlHours',
+      'getDeviceTtlDays', 'getSetPasswordTtlHours', 'getLoginMaxFailures',
+      'getAuthCacheTtlSeconds']],
+    ['SheetService', () => SheetService, ['createUser', 'getUser', 'getUserByEmail',
+      'updateUser', 'listUsers', 'createDevice', 'getDevice', 'updateDevice',
+      'getDevicesForUser', 'listDevices', 'revokeDevicesForUser',
+      'getAuthAuditEvents', 'getInspection', 'updateInspection']],
+    ['PasswordService', () => PasswordService, ['hashPassword', 'verifyPassword',
+      'hasPassword', 'validatePolicy']],
+    ['UserService', () => UserService, ['getById', 'getByEmail', 'listAll',
+      'countActiveAdmins', 'create', 'update', 'isLocked', 'registerFailedLogin',
+      'normalizeEmail', 'toPublic']],
+    ['DeviceService', () => DeviceService, ['register', 'getById', 'checkUsable',
+      'touch', 'revoke', 'revokeAllForUser', 'listForUser']],
+    ['MailService', () => MailService, ['sendSetPasswordLink']],
+    ['AuthService', () => AuthService, ['generateSessionToken', 'generateDeviceToken',
+      'generateSetPasswordToken', 'generateTenantToken', 'verifyToken',
+      'verifySetPasswordToken', 'verifyDeviceToken', 'resolveAuth',
+      'requireAdmin', 'requireStaff', 'requireMatchingInspection']],
+    ['AccountService', () => AccountService, ['login', 'setPassword',
+      'changePassword', 'requestPasswordReset', 'refreshSession', 'me', 'signOut']],
+    ['UserAdminService', () => UserAdminService, ['listUsers', 'createUser',
+      'setUserStatus', 'setUserRole', 'unlockUser', 'sendPasswordLink',
+      'listUserDevices', 'revokeDevice', 'revokeAllDevices', 'getAuthLog',
+      'assignInspection']],
+    ['AuditService', () => AuditService, ['log', 'logAuth', 'getEventsForInspection']],
+    ['InspectionService', () => InspectionService, ['createInspection', 'getInspection',
+      'saveSection', 'lockInspection', 'unlockInspection', 'listInspections']],
+    ['AttachmentService', () => AttachmentService, ['uploadAttachment', 'deleteAttachment']],
+    ['SignatureService', () => SignatureService, ['saveSignature']],
+    ['PdfService', () => PdfService, ['finalizeInspection']],
+    ['DriveService', () => DriveService, ['createInspectionFolders', 'getThumbnailUrl']],
+    ['SchemaService', () => SchemaService, ['listActiveSchemas', 'getSchemaJson']],
+    ['SchemaSeed', () => SchemaSeed, ['getAllSeeds']],
+    ['ValidationService', () => ValidationService, []],
+    ['ResponseService', () => ResponseService, ['success', 'error', 'fromException']],
+    ['Router', () => Router, ['dispatch', 'listActions']],
+  ];
+
+  const problems = [];
+  let checked = 0;
+
+  SERVICES.forEach(function (entry) {
+    const name = entry[0];
+    let service;
+    try {
+      service = entry[1]();
+    } catch (e) {
+      problems.push(`✗ ${name} is missing entirely — its file was lost or overwritten`);
+      return;
+    }
+    if (!service) {
+      problems.push(`✗ ${name} is declared but empty`);
+      return;
+    }
+    const missing = entry[2].filter(fn => typeof service[fn] !== 'function');
+    if (missing.length) {
+      problems.push(`✗ ${name} is incomplete — missing: ${missing.join(', ')}`);
+    } else {
+      checked++;
+    }
+  });
+
+  // The routing table is the other place a partial copy shows up: a stale
+  // Router.gs loads perfectly well and simply has no idea the new actions exist.
+  const EXPECTED_ACTIONS = [
+    'login', 'requestPasswordReset', 'setPassword', 'refreshSession',
+    'changePassword', 'me', 'signOut',
+    'listUsers', 'createUser', 'setUserStatus', 'setUserRole', 'unlockUser',
+    'sendPasswordLink', 'listUserDevices', 'revokeDevice', 'revokeAllDevices',
+    'getAuthLog', 'assignInspection',
+    'getSchemas', 'getSchema', 'createInspection', 'getInspection', 'saveSection',
+    'lockInspection', 'unlockInspection', 'regenerateTenantToken', 'listInspections',
+    'uploadAttachment', 'deleteAttachment', 'saveSignature', 'finalizeInspection',
+    'getAuditLog',
+  ];
+  try {
+    const actions = Router.listActions();
+    const missingRoutes = EXPECTED_ACTIONS.filter(a => actions.indexOf(a) < 0);
+    if (missingRoutes.length) {
+      problems.push(`✗ Router is out of date — missing routes: ${missingRoutes.join(', ')}`);
+    }
+  } catch (e) {
+    problems.push(`✗ Router could not be read: ${e.message}`);
+  }
+
+  try {
+    const publicActions = PUBLIC_ACTIONS;
+    const expectedPublic = ['login', 'requestPasswordReset', 'setPassword', 'refreshSession'];
+    const unexpected = publicActions.filter(a => expectedPublic.indexOf(a) < 0);
+    if (unexpected.length) {
+      problems.push(`✗ these actions run without authentication and should not: ${unexpected.join(', ')}`);
+    }
+    expectedPublic.forEach(a => {
+      if (publicActions.indexOf(a) < 0) {
+        problems.push(`✗ PUBLIC_ACTIONS is missing '${a}' — signing in will be refused`);
+      }
+    });
+  } catch (e) {
+    problems.push('✗ PUBLIC_ACTIONS is missing — Code.gs did not make it across');
+  }
+
+  if (problems.length === 0) {
+    Logger.log(`✓ All ${checked} services present and complete.`);
+    Logger.log('✓ Routing table and public action list match this version.');
+    Logger.log('');
+    Logger.log('Now run smokeTest() to check the configuration and the workbook.');
+  } else {
+    Logger.log(`${problems.length} problem(s) found:`);
+    Logger.log('');
+    problems.forEach(p => Logger.log('  ' + p));
+    Logger.log('');
+    Logger.log('Re-copy the named files from gas/ in the repository. A file whose');
+    Logger.log('content went missing was almost certainly overwritten by a paste');
+    Logger.log('meant for it — check its neighbours too.');
+  }
+}
+
+/**
  * Quick smoke test. Run after full setup to verify all components.
  * Logs PASS/FAIL for each check.
  */

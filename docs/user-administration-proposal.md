@@ -570,7 +570,20 @@ Postupak puštanja u rad, redom:
 4. `setupFirstAdmin()` — prvi nalog; adresa i ime se upisuju u dve označene
    linije na vrhu same funkcije, jer dugme **Run** u editoru ne može da prosledi
    argumente
-5. `smokeTest()` — provera da sve stoji
+5. `verifyDeployment()` — provera da je **svaki** servis stigao ceo
+
+   Pokretati posle svakog ručnog prenošenja fajlova. Prenošenje ide fajl po
+   fajl, a nalepljivanje u pogrešan fajl istovremeno udvostruči jedan sadržaj i
+   **tiho uništi** onaj na koji je palo. Duplikat je glasan — projekat prestane
+   da se učitava — ali uništena polovina ćuti: sve radi dok se taj servis ne
+   pozove, što može biti danima kasnije. `smokeTest()` dodiruje šest servisa;
+   ovo proverava svih dvadeset i jedan, plus tabelu ruta i spisak javnih akcija.
+
+   Imena fajlova pritom ne znače ništa — Apps Script izvršava sadržaj bez
+   obzira na to kako se fajl zove. Bitne su samo deklaracije, i njih ova
+   funkcija i proverava.
+
+6. `smokeTest()` — provera podešavanja i radne sveske
 
 Merenje iz koraka 3 nije formalnost — na ovom deploymentu je pokazalo da je
 prvobitna procena bila pogrešna za red veličine, i zbog toga je minimalna dužina
