@@ -422,6 +422,35 @@ function smokeTest() {
     }
   });
 
+  // Sequential IDs come from Script Properties, not from the sheets, so that a
+  // deleted row can never have its ID handed to someone else — userId is
+  // referenced from Devices, from AuditLog details, and from createdBy and
+  // assignedTo on Inspections, and reuse would silently transfer one person's
+  // history to another.
+  //
+  // The cost of keeping them apart is that they can drift. Clearing the
+  // property while rows remain is the dangerous direction: the next ID issued
+  // is one that already exists, and nothing complains at the time.
+  check('ID counters are ahead of the rows they number', () => {
+    const props = PropertiesService.getScriptProperties();
+    const year = Utils.currentYear();
+    const behind = [];
+
+    [['userCounter', 'Users', 'userId'],
+     ['deviceCounter', 'Devices', 'deviceId'],
+     ['inspectionCounter', 'Inspections', 'inspectionId']].forEach(function (entry) {
+      const counter = parseInt(props.getProperty(`${entry[0]}_${year}`) || '0', 10);
+      const highest = _highestIdSuffix(entry[1], entry[2], year);
+      if (highest > counter) {
+        behind.push(`${entry[0]}_${year} is ${counter} but ${entry[1]} already reaches ${highest}`);
+      }
+    });
+
+    if (behind.length) {
+      throw new Error(behind.join('; ') + ' — the next ID issued would be a duplicate');
+    }
+  });
+
   Logger.log(checks.join('\n'));
 
   // Printed rather than asserted: no check here can tell a working address from
@@ -436,6 +465,30 @@ function smokeTest() {
   }
 }
 
+
+/**
+ * Highest NNNNNN currently used on a sheet, for IDs of the form PRE-YYYY-NNNNNN.
+ * Rows from other years are ignored — each year counts from one.
+ */
+function _highestIdSuffix(sheetName, idColumn, year) {
+  const columns = SheetService.COLUMNS[sheetName];
+  const index = columns.indexOf(idColumn);
+  const sheet = SpreadsheetApp.openById(Config.getWorkbookId()).getSheetByName(sheetName);
+  if (!sheet) return 0;
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return 0;
+
+  const values = sheet.getRange(2, index + 1, lastRow - 1, 1).getValues();
+  let highest = 0;
+  for (let i = 0; i < values.length; i++) {
+    const match = String(values[i][0]).match(/^[A-Z]+-(\d{4})-(\d+)$/);
+    if (!match || Number(match[1]) !== year) continue;
+    const n = Number(match[2]);
+    if (n > highest) highest = n;
+  }
+  return highest;
+}
 
 /**
  * Diagnostic: simulate what the frontend sends for saveSection.
