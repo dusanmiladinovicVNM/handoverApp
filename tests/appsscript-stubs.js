@@ -136,7 +136,11 @@ function createEnvironment(overrides, options) {
     setPasswordTtlHours: 48,
     loginMaxFailures: 5,
     loginLockMinutes: 15,
-    authCacheTtlSeconds: 60,
+    // Mirroring off by default. A remembered row would mask exactly the
+    // property most of these tests exist to protect — that role and status are
+    // re-read per request — so the default reads through to the store every
+    // time. auth-mirror.test.js turns it on deliberately.
+    authCacheTtlSeconds: 0,
   }, overrides || {});
 
   const Config = {
@@ -162,6 +166,7 @@ function createEnvironment(overrides, options) {
       getScriptProperties: () => ({
         getProperty: (k) => (k in properties ? properties[k] : null),
         setProperty: (k, v) => { properties[k] = v; },
+        deleteProperty: (k) => { delete properties[k]; },
       }),
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
@@ -189,16 +194,16 @@ function createEnvironment(overrides, options) {
   // Order matters only for `const` visibility at load time, not for the code
   // under test — Router.gs proves that by resolving its services lazily.
   const sources = [
-    'Utils.gs', 'PasswordService.gs', 'UserService.gs', 'DeviceService.gs',
-    'MailService.gs', 'AuditService.gs', 'AuthService.gs', 'AccountService.gs',
-    'UserAdminService.gs',
+    'Utils.gs', 'PasswordService.gs', 'AuthMirror.gs', 'UserService.gs',
+    'DeviceService.gs', 'MailService.gs', 'AuditService.gs', 'AuthService.gs',
+    'AccountService.gs', 'UserAdminService.gs',
   ];
   const code = sources
     .map(f => fs.readFileSync(path.join(GAS_DIR, f), 'utf8'))
     .join('\n')
     // `const` at script top level is lexical, so the values have to be handed
     // out explicitly rather than read off the context.
-    + '\nglobalThis.__exports = { Utils, PasswordService, UserService, ' +
+    + '\nglobalThis.__exports = { Utils, PasswordService, AuthMirror, UserService, ' +
       'DeviceService, MailService, AuditService, AuthService, AccountService, ' +
       'UserAdminService, HandoverError };';
 
@@ -207,6 +212,9 @@ function createEnvironment(overrides, options) {
   // audit.events is the same array the log writes into, not a copy.
   return Object.assign({}, ctx.__exports, {
     db, mail, config, properties, audit: { events: db.auditLog },
+    // Exposed so auth-mirror.test.js can age or evict a copy the way the
+    // platform would, rather than waiting six hours.
+    CacheService: sandbox.CacheService,
   });
 }
 

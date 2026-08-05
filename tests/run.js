@@ -15,6 +15,7 @@ const suites = [
   ['Sheet reads and cache', require('./sheet-cache.test')],
   ['Passwords', require('./password.test')],
   ['Tokens and authorization', require('./auth.test')],
+  ['Auth mirror', require('./auth-mirror.test')],
   ['Sign-in flows', require('./account.test')],
   ['Account administration', require('./user-admin.test')],
 ];

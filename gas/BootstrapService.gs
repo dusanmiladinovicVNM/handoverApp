@@ -57,7 +57,7 @@ function _seedMissingConfigKeys(ss) {
     ['setPasswordTtlHours', '48', 'How long a set-password link stays valid'],
     ['loginMaxFailures', '5', 'Failed sign-ins before an account locks'],
     ['loginLockMinutes', '15', 'How long an account stays locked'],
-    ['authCacheTtlSeconds', '60', 'How long a cached user or device row is trusted'],
+    ['authCacheTtlSeconds', '21600', 'How long a mirrored user or device row is trusted; revocation through the app is immediate regardless. 0 disables mirroring'],
     ['slowRequestMs', '5000', 'Requests slower than this record their timing in AuditLog; 0 logs all'],
   ];
 
@@ -198,6 +198,7 @@ function verifyDeployment() {
       'setUserStatus', 'setUserRole', 'unlockUser', 'sendPasswordLink',
       'listUserDevices', 'revokeDevice', 'revokeAllDevices', 'getAuthLog',
       'assignInspection']],
+    ['AuthMirror', () => AuthMirror, ['get', 'put', 'remove']],
     ['AuditService', () => AuditService, ['log', 'logAuth', 'getEventsForInspection']],
     ['InspectionService', () => InspectionService, ['createInspection', 'getInspection',
       'saveSection', 'lockInspection', 'unlockInspection', 'listInspections']],

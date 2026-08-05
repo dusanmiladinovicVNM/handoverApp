@@ -20,11 +20,11 @@ const UserService = (function () {
   const ROLES = ['admin', 'inspector'];
   const STATUSES = ['active', 'disabled'];
 
-  // --- Cache ---
-
-  function _cache() {
-    return CacheService.getScriptCache();
-  }
+  // --- Cached reads ---
+  //
+  // Both lookups sit on the request path: resolving a session reads by id, and
+  // signing in reads by email. AuthMirror keeps the copies; this only decides
+  // the keys and when to drop them.
 
   function _idKey(userId) {
     return `u:${userId}`;
@@ -34,29 +34,16 @@ const UserService = (function () {
     return `ue:${String(email).trim().toLowerCase()}`;
   }
 
+  /**
+   * Drop both keys for a user. Called after every write, which is what lets the
+   * mirror be trusted for hours without delaying a revocation.
+   */
   function _invalidate(user) {
     if (!user) return;
     const keys = [];
     if (user.userId) keys.push(_idKey(user.userId));
     if (user.email) keys.push(_emailKey(user.email));
-    if (keys.length) _cache().removeAll(keys);
-  }
-
-  function _cacheGet(key) {
-    try {
-      const raw = _cache().get(key);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function _cachePut(key, user) {
-    try {
-      _cache().put(key, JSON.stringify(user), Config.getAuthCacheTtlSeconds());
-    } catch (e) {
-      // A cache miss is only slower, never wrong. Never fail the request.
-    }
+    AuthMirror.remove(keys);
   }
 
   // --- Reads ---
@@ -64,11 +51,11 @@ const UserService = (function () {
   function getById(userId) {
     if (!userId) return null;
     const key = _idKey(userId);
-    const cached = _cacheGet(key);
-    if (cached) return cached;
+    const mirrored = AuthMirror.get(key);
+    if (mirrored) return mirrored;
 
     const user = SheetService.getUser(userId);
-    if (user) _cachePut(key, user);
+    if (user) AuthMirror.put(key, user);
     return user;
   }
 
@@ -76,11 +63,11 @@ const UserService = (function () {
     const normalized = normalizeEmail(email);
     if (!normalized) return null;
     const key = _emailKey(normalized);
-    const cached = _cacheGet(key);
-    if (cached) return cached;
+    const mirrored = AuthMirror.get(key);
+    if (mirrored) return mirrored;
 
     const user = SheetService.getUserByEmail(normalized);
-    if (user) _cachePut(key, user);
+    if (user) AuthMirror.put(key, user);
     return user;
   }
 
