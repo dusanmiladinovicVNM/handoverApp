@@ -1,8 +1,8 @@
 # Predlog: administracija naloga u handoverApp
 
-Status: predlog za odluku
+Status: predlog za sprovođenje
 Autor: pripremljeno za vlasnika sistema
-Verzija: 1.0
+Verzija: 2.0 — ugrađene donete odluke
 
 ---
 
@@ -17,88 +17,47 @@ Uvesti pojam **korisnika** u handoverApp i ekran na kome ovlašćena osoba:
 
 **Šta ovaj predlog namerno ne dira:** tok za stanare. Link sa `?t=` tokenom,
 `requireMatchingInspection` i `requireMatchingRole` ostaju netaknuti. Stanari
-nemaju naloge i ne treba da ih imaju — svaki pokušaj da se i oni uvuku u model
-korisnika udvostručio bi obim posla bez ijedne koristi.
+nemaju naloge i ne treba da ih imaju.
 
 ---
 
 ## 2. Zašto je ovo potrebno
 
 Trenutno stanje (`gas/Authservice.gs`) nema pojam osobe. Postoji samo uloga
-`admin` i lista nonce-ova u Script Properties. Praktične posledice:
+`admin` i lista nonce-ova u Script Properties.
 
 | Pitanje | Trenutni odgovor |
 |---|---|
 | Ko je izmenio ovu inspekciju? | `admin:Dušan main device` — slobodan tekst iz tokena, ne zapis o osobi |
-| Kako da damo pristup novom kolegi? | Otvoriti Apps Script editor, izmeniti konstantu `LABEL`, pokrenuti funkciju, prekopirati token iz loga, poslati ga nekako |
+| Kako da damo pristup novom kolegi? | Otvoriti Apps Script editor, izmeniti konstantu `LABEL`, pokrenuti funkciju, prekopirati token iz loga |
 | Kako da oduzmemo pristup? | Otvoriti editor, pokrenuti `listAdminTokens()`, naći nonce, pokrenuti `revokeAdminTokenByNonce()` |
 | Ko ima pristup upravo sada? | Samo iz editora |
-| Kome je token istekao? | Za 365 dana od izdavanja, bez upozorenja |
 
-Sve to znači da pristup sistemu može da menja samo osoba koja ume da uđe u
-Apps Script editor — a to je isti nivo pristupa kao i mogućnost da promeni ceo
-backend. Nema srednjeg nivoa: ili si programer, ili ne možeš da administriraš
-naloge.
+Pristup sistemu, dakle, može da menja samo osoba koja ume da uđe u Apps Script
+editor — a to je isti nivo pristupa kao i mogućnost da promeni ceo backend.
+Nema srednjeg nivoa.
 
 ---
 
-## 3. Ključna odluka: čime se korisnik prijavljuje
+## 3. Donete odluke
 
-Tri realne opcije.
+| Pitanje | Odluka |
+|---|---|
+| Kredencijal | **Email + lozinka**, isti model kao Spesen |
+| Uloge | **`admin` + `inspector`** |
+| Vidljivost inspekcija | **Inspektor vidi samo svoje**, admin vidi sve |
 
-| | A — Lozinka (model iz Spesena) | B — Email + jednokratni kod | C — Google Sign-In |
-|---|---|---|---|
-| Baza kredencijala | `PassHash` + `Salt` u tabeli | **nema je** | nema je |
-| Kvalitet hash-a | Apps Script nema bcrypt/scrypt/PBKDF2; ostaje brzi SHA — slaba odbrana ako iko dobije pristup tabeli | nije primenljivo | nije primenljivo |
-| Početni kredencijal | šalje se nešifrovanim mejlom | nema ga | nema ga |
-| "Zaboravio sam lozinku" | poseban tok koji treba napisati | **ne postoji kao pojam** | Google to rešava |
-| Radi za spoljne saradnike | da | da | samo uz Google nalog |
-| Drugi faktor | ne | slabo (posed mejla) | da, besplatno od Google-a |
-| Koliko novog koda | najviše | srednje | najmanje |
-
-### Preporuka: **opcija B — email + jednokratni šestocifreni kod**
-
-Obrazloženje:
-
-1. **Nema baze lozinki koju treba čuvati.** Apps Script nema pravu funkciju za
-   izvođenje ključa; `Utilities.computeDigest` je brz SHA-256, što znači da bi
-   lista hash-eva u Sheetsu bila slabo zaštićena od offline probijanja. Model
-   bez lozinke tu klasu problema uklanja, ne ublažava.
-2. **Ne postoji trenutak u kome kredencijal putuje nešifrovanom poštom kao
-   trajna vrednost.** Spesenov `README.md` to i navodi kao poznatu slabost svog
-   modela. Kod jednokratnog koda mejlom ide vrednost koja važi 10 minuta i
-   troši se pri prvoj upotrebi.
-3. **Ceo niz ekrana i tokova jednostavno ne postoji:** postavljanje početne
-   lozinke, promena lozinke, reset lozinke, politika složenosti, prisilna
-   rotacija. To je otprilike polovina posla u opciji A.
-4. **Aktivacija i gašenje su inherentni.** Ako red korisnika nije `active`, kod
-   se ne šalje i prijava ne postoji. Nema stanja u kome je nalog ugašen a
-   kredencijal još radi.
-5. **Ponovo se koristi ono što već postoji.** HMAC potpisivanje, `Utils.safeEqual`,
-   provera `exp`, opoziv preko nonce-a — sve je već napisano i radi u
-   `Authservice.gs`. Menja se sadržaj payload-a, ne mehanizam.
-
-**Cena koju treba svesno prihvatiti:** svaka nova prijava traži mejl. Rešava se
-tokenom uređaja (tačka 5) — sesija traje 12 sati, uređaj se pamti 60 dana. U
-praksi korisnik unosi kod jednom u dva meseca.
-
-**Kada bih ipak izabrao A:** ako je dosledan model prijave u obe aplikacije
-(Spesen i handoverApp) važniji od gornjih pet tačaka — jedan način rada, jedna
-procedura podrške, jedno objašnjenje korisnicima. To je legitiman argument i
-odluka je tvoja; tehnički je B bolji.
-
-**Kada bih izabrao C:** ako su svi sadašnji i budući korisnici na Google
-Workspace-u firme. Tada je najmanje koda, a MFA dobijaš besplatno. Ograničenje
-je što svaki budući spoljni saradnik mora imati Google nalog.
-
-Ostatak dokumenta pisan je za opciju B. Model podataka i ceo ekran za
-administraciju identični su i za C — menja se samo korak provere kredencijala.
+Ostatak dokumenta pisan je za ove tri odluke. Dve od njih povlače posledice koje
+treba pročitati pažljivo: lozinka zahteva sekciju 5 (čuvanje lozinke u okruženju
+koje za to nema alat), a "samo svoje" zahteva sekciju 9 (jer `createdBy` nije
+isto što i "čija je inspekcija").
 
 ---
 
 ## 4. Model podataka
 
-Dva nova lista u postojećoj radnoj svesci, uklopljena u `SheetService.COLUMNS`.
+Dva nova lista u postojećoj radnoj svesci, uklopljena u `SheetService.COLUMNS`,
+i jedna nova kolona na postojećem listu.
 
 ### List `Users`
 
@@ -106,18 +65,22 @@ Dva nova lista u postojećoj radnoj svesci, uklopljena u `SheetService.COLUMNS`.
 |---|---|
 | `userId` | `USR-YYYY-NNNNNN`, isti obrazac kao `generateInspectionId()` |
 | `email` | mala slova, **jedinstven** — prirodni ključ |
-| `name` | ime i prezime, ide u audit i u PDF |
+| `name` | ime i prezime; ide u audit i u PDF |
 | `role` | `admin` \| `inspector` |
 | `status` | `active` \| `disabled` |
+| `passHash` | vidi sekciju 5 — jedna samoopisna vrednost, ne hash + salt zasebno |
+| `passSetAt` | kada je lozinka poslednji put postavljena |
+| `failedCount` | brojač uzastopnih promašaja |
+| `lockedUntil` | ISO vreme do kada je nalog zaključan; prazno kad nije |
 | `createdAt` / `createdBy` | ko je i kada otvorio nalog |
 | `disabledAt` / `disabledBy` | ko je i kada ugasio |
 | `lastLoginAt` | poslednja uspešna prijava |
 | `notes` | slobodan tekst za admina |
 
-Namerno **samo dva statusa**. Treće stanje ("pozvan", "još nije postavio
-lozinku") ne postoji jer nema šta da se postavlja — oznaka *još se nije
-prijavio* izvodi se iz praznog `lastLoginAt` i prikazuje kao badge. Jedno
-stanje manje znači jedan prelaz manje koji može da se pokvari.
+Namerno **samo dva statusa**. Spesenovo treće stanje (`PwGeaendert = false`,
+"noch nicht angemeldet") ovde ne postoji kao kolona — izvodi se iz praznog
+`passHash` i prikazuje kao badge *još nije postavio lozinku*. Jedno stanje manje
+je jedan prelaz manje koji može da se pokvari.
 
 ### List `Devices`
 
@@ -125,49 +88,150 @@ stanje manje znači jedan prelaz manje koji može da se pokvari.
 |---|---|
 | `deviceId` | `DEV-YYYY-NNNNNN` |
 | `userId` | vlasnik |
-| `label` | "iPhone Safari", predlaže se automatski iz User-Agenta, korisnik može da promeni |
-| `nonce` | vrednost za opoziv; menja se samo brisanjem uređaja |
+| `label` | "iPhone Safari", predlaže se iz User-Agenta, korisnik može da promeni |
+| `nonce` | vrednost za opoziv |
 | `createdAt` / `lastSeenAt` | za prikaz "poslednji put korišćen pre 3 dana" |
 | `expiresAt` | 60 dana od kreiranja |
 | `revokedAt` / `revokedBy` | ko je i kada odjavio uređaj |
 | `userAgent` | pun string, za prepoznavanje sumnjivog uređaja |
 
-Ovaj list **zamenjuje** `ADMIN_NONCES` iz Script Properties. Ista uloga, ali
-vidljiva u UI, vezana za osobu i sa istorijom.
+Ovaj list **zamenjuje** `ADMIN_NONCES` iz Script Properties, i ujedno igra ulogu
+Spesenovog lista `Sessions` — ali sa imenom uređaja, istorijom i dugmetom za
+odjavu, umesto reda koji se briše ručno.
 
-### Jednokratni kodovi — **ne u tabelu**
+### Izmena postojećeg lista `Inspections`
 
-Kod se čuva u `CacheService.getScriptCache()`, ključ `otp:<sha256(email)>`,
-vrednost `{codeHash, expiresAt, attempts}`, TTL 600 sekundi. Razlozi: sam se
-briše (nema čišćenja), ne ostavlja trag u trajnom skladištu, i ne može da se
-pročita iz tabele. U tabelu ide samo audit zapis da je kod tražen — ne i sam kod.
+Dodaje se kolona **`assignedTo`** (email inspektora). Razlog je objašnjen u
+sekciji 9 — bez nje odluka "inspektor vidi samo svoje" ne funkcioniše u praksi.
+
+### Privremene vrednosti — **ne u tabelu**
+
+Tokeni za postavljanje lozinke i brojači učestalosti čuvaju se u
+`CacheService.getScriptCache()`. Sami se brišu, ne ostavljaju trag u trajnom
+skladištu i ne mogu se pročitati iz tabele.
 
 ### Audit — postojeći list `AuditLog`
 
-Nema novog lista. `AuditLog` već ima `eventId`, `inspectionId`, `actor`,
-`eventType`, `timestamp`, `detailsJson`. Za događaje vezane za naloge
-`inspectionId` ostaje prazan, a dodaju se tipovi:
+Nema novog lista. Za događaje vezane za naloge `inspectionId` ostaje prazan, a
+dodaju se tipovi:
 
 ```
-login_code_requested   login_succeeded      login_failed
-user_created           user_disabled        user_enabled
+login_succeeded        login_failed          account_locked
+password_set           password_changed      password_reset_sent
+user_created           user_disabled         user_enabled
 role_granted           role_revoked
 device_registered      device_revoked
+inspection_assigned
 ```
 
 `actor` postaje `user:ime.prezime@firma.rs` umesto `admin:<8 znakova tokena>`.
-Time svaki postojeći zapis u inspekcijama dobija pravo ime osobe.
+Time i svaki postojeći zapis u inspekcijama dobija pravo ime osobe.
 
 ---
 
-## 5. Model tokena
+## 5. Čuvanje lozinke — najosetljiviji deo posla
 
-Tri tipa, svi u postojećem formatu `base64url(payload).hmac`:
+Ovo je jedina tačka u kojoj izbor lozinke traži pažnju kakvu ostatak posla ne
+traži, pa je treba pročitati u celini pre nego što se krene.
+
+### Problem
+
+Apps Script nema ni bcrypt, ni scrypt, ni Argon2, ni ugrađen PBKDF2. Jedino što
+postoji je `Utilities.computeDigest` (jedan prolaz SHA-256) i
+`Utilities.computeHmacSha256Signature`. Naivno rešenje — `sha256(salt + lozinka)`,
+što je ono što Spesenov model kolona `PassHash` + `Salt` sugeriše — daje hash
+koji se na običnom GPU proverava milijardama pokušaja u sekundi. Ako bilo ko
+ikada dobije pristup radnoj svesci, sve lozinke koje nisu duge padaju za nekoliko
+minuta.
+
+### Rešenje
+
+PBKDF2-HMAC-SHA256 napisan ručno nad postojećom primitivom:
+
+```js
+function _pbkdf2Sha256(password, saltBytes, iterations) {
+  // dkLen = 32 → jedan blok, INT(1) = 0x00000001
+  const block = saltBytes.concat([0, 0, 0, 1]);
+  let u = Utilities.computeHmacSha256Signature(block, password);
+  const out = u.slice();
+  for (let i = 1; i < iterations; i++) {
+    u = Utilities.computeHmacSha256Signature(u, password);
+    for (let j = 0; j < out.length; j++) out[j] ^= u[j];
+  }
+  return out;
+}
+```
+
+Vrednost u koloni `passHash` je samoopisna, u jednom polju:
+
+```
+pbkdf2-sha256$<brojIteracija>$<saltBase64>$<hashBase64>
+```
+
+Zašto jedno polje umesto Spesenova dva: broj iteracija se upisuje **uz svaki
+hash**. To znači da za godinu dana možeš podići broj iteracija, a postojeći
+korisnici nastave da rade — njihov red se preračuna pri sledećoj uspešnoj
+prijavi, kada je lozinka u memoriji. Sa fiksnim brojem iteracija u kodu to nije
+moguće bez resetovanja svih lozinki.
+
+### Koliko iteracija
+
+**Broj se ne sme prepisati iz ovog dokumenta — mora se izmeriti na stvarnom
+deploymentu.** Svaki poziv `computeHmacSha256Signature` prelazi granicu između
+JavaScripta i native koda, i taj trošak je u Apps Scriptu znatno veći nego u
+običnom okruženju. Postupak:
+
+1. Napisati `benchmarkPbkdf2()` u editoru, meriti 1.000, 5.000 i 20.000 iteracija.
+2. Izabrati najveći broj koji drži prijavu **ispod 1 sekunde**.
+3. Realno očekivanje je red veličine 1.000–5.000. Upisati izmerenu vrednost u `Config`.
+
+### Šta ovo jeste, a šta nije — bez ulepšavanja
+
+Ovo je oko **hiljadu puta skuplje** od jednog prolaza SHA-256, i to je stvarna,
+merljiva razlika. Ali to i dalje nije ni blizu onoga što daje bcrypt ili Argon2,
+gde je preporuka danas reda stotina hiljada iteracija. Okruženje jednostavno ne
+dozvoljava više.
+
+**Posledica koju treba prihvatiti i nadomestiti:** u ovom modelu sigurnost
+zapravo nosi **dužina lozinke**, ne funkcija za hešovanje. Zato:
+
+- **Minimum 12 znakova**, ne 8 kao u Spesenu. Bez pravila o velikim slovima,
+  brojevima i znakovima — ona proizvode `Lozinka1!` i smanjuju stvarnu
+  otpornost. Duža fraza od četiri reči je i lakša za pamćenje i neuporedivo jača.
+- Ekran za postavljanje lozinke pokazuje procenu jačine i **odbija** 200-tinak
+  najčešćih lozinki iz ugrađene liste.
+- Zaključavanje naloga iz sekcije 11 je ovde obavezno, a ne opcija — ono je
+  jedina odbrana od pogađanja preko mreže.
+- Radna sveska ne sme biti deljena šire nego što je nužno. Hash-evi lozinki su
+  od danas najosetljivija stvar u njoj.
+
+### Prvo postavljanje lozinke — bez lozinke u mejlu
+
+Spesen šalje početnu lozinku mejlom i kolonom `PwGeaendert` tera korisnika da je
+promeni; njegov `README.md` sam navodi da lozinka time jednom prođe kroz
+nešifrovanu poštu. To se izbegava bez izlaska iz modela lozinke:
+
+Mejlom ide **jednokratni link za postavljanje lozinke** — potpisan token iz
+postojeće HMAC mašinerije, `{typ:'setpw', uid, exp, nonce}`, koji važi 48 sati i
+troši se pri prvoj upotrebi. Korisnik otvara link i **sam bira** lozinku. Nijedna
+lozinka nikada ne putuje mejlom, i ne postoji prelazno stanje u kome nalog ima
+lozinku koju zna i pošiljalac.
+
+Isti mehanizam pokriva i reset: admin klikne *Pošalji link za novu lozinku*, ili
+korisnik sam zatraži preko *Zaboravio sam lozinku*.
+
+---
+
+## 6. Model tokena i provera prava
+
+Posle uspešne prijave izdaju se tokeni u postojećem formatu
+`base64url(payload).hmac`:
 
 | Tip | Payload | Trajanje |
 |---|---|---|
 | Sesija | `{typ:'s', uid, did, exp, nonce}` | 12 sati |
 | Uređaj | `{typ:'d', uid, did, exp, nonce}` | 60 dana |
+| Postavljanje lozinke | `{typ:'setpw', uid, exp, nonce}` | 48 sati, jednokratan |
 | Stanar | `{iid, role:'tenant', exp, nonce}` | **nepromenjeno** |
 
 ### Najvažnije pravilo celog predloga
@@ -175,10 +239,10 @@ Tri tipa, svi u postojećem formatu `base64url(payload).hmac`:
 > **Uloga se ne nalazi u tokenu.** Token nosi identitet (`uid`), a ovlašćenje se
 > čita iz reda u listu `Users` pri svakom zahtevu.
 
-Bez ovog pravila ekran za administraciju ne ispunjava ono što obećava. Ako bi
-`role` stajala u potpisanom tokenu, "oduzeo sam mu admin prava" značilo bi
-"prestaće da bude admin za 12 sati" — a to nije ono što administrator misli da
-je uradio kada klikne dugme. Isto važi i za gašenje naloga.
+Bez ovog pravila ekran za administraciju ne radi ono što obećava. Da `role` stoji
+u potpisanom tokenu, "oduzeo sam mu admin prava" značilo bi "prestaće da bude
+admin za 12 sati" — a to nije ono što administrator misli da je uradio kada
+klikne dugme. Isto važi za gašenje naloga.
 
 ### Provera na svaki zahtev
 
@@ -187,67 +251,76 @@ Nadogradnja `AuthService.verifyToken()`:
 1. HMAC potpis i `exp` — postojeći kod, nepromenjen
 2. `did` → red u `Devices`: postoji, `revokedAt` prazan, `nonce` se poklapa, nije istekao
 3. `uid` → red u `Users`: `status === 'active'`
-4. `authCtx.role` = `role` iz tog reda, `authCtx.email`, `authCtx.name`, `authCtx.actorString = 'user:' + email`
+4. `authCtx` dobija `role`, `email`, `name` iz tog reda, i `actorString = 'user:' + email`
 
 Koraci 2 i 3 su dva dodatna čitanja iz Sheetsa po API pozivu. Rešava se
-`CacheService` keširanjem po ključevima `u:<uid>` i `d:<did>` sa TTL 60
-sekundi, koje se **briše pri svakoj izmeni** korisnika ili uređaja. Isti
-obrazac već postoji u `Config.gs` (keš od 30 sekundi), pa je dosledno.
+`CacheService` keširanjem po ključevima `u:<uid>` i `d:<did>` sa TTL 60 sekundi,
+koje se **briše pri svakoj izmeni** korisnika ili uređaja. Isti obrazac već
+postoji u `Config.gs` (keš od 30 sekundi), pa je dosledno.
 
 **Kompromis koji treba prihvatiti:** promena uloge ili gašenje naloga stupaju na
-snagu u roku od 60 sekundi, ne trenutno. Ako je i to previše, TTL za `Users` se
-spusti na nulu uz cenu jednog čitanja po zahtevu. Preporuka je 60 sekundi, uz
-to što gašenje naloga **odmah** opoziva sve uređaje te osobe — pa ugašeni
-korisnik u najgorem slučaju ima još jedan minut pristupa sa uređaja koji je već
-bio prijavljen, i nijednu mogućnost nove prijave.
+snagu u roku od 60 sekundi, ne trenutno. Uz to gašenje naloga **odmah** opoziva
+sve uređaje te osobe — pa ugašeni korisnik u najgorem slučaju ima još jedan minut
+pristupa sa uređaja koji je već bio prijavljen, i nijednu mogućnost nove prijave.
+
+### Promena lozinke poništava sve sesije
+
+Kao u Spesenu, i s pravom. Izvodi se opozivom svih redova u `Devices` za tog
+korisnika — bez nove kolone i bez nove logike. Izgubljen ili tuđ uređaj se time
+odjavljuje sam.
 
 ---
 
-## 6. Tok prijave
+## 7. Tokovi
 
 ```
-1. Ekran /login  →  polje "Email"  →  [Pošalji kod]
+PRVI PRISTUP
+  Admin doda korisnika (ime, email, uloga)
+    → red u Users, passHash prazan, status active
+    → mejl sa jednokratnim linkom, važi 48h
+  Korisnik otvara link → bira lozinku (min 12 znakova) → prijavljen
+    → token se troši, passSetAt upisan
 
-2. requestLoginCode(email)                          [javna akcija]
-   ├─ korisnik ne postoji ILI status != active
-   │    → vrati ISTI odgovor kao za uspeh, ne šalji ništa
-   │      (postojanje naloga se ne otkriva)
-   └─ korisnik aktivan
-        → 6 cifara izvedenih iz Utilities.getUuid()
-        → sha256(kod + uid + TOKEN_SECRET) u keš, 10 min
-        → MailApp.sendEmail
+PRIJAVA
+  /login  →  email + lozinka  +  [x] Zapamti ovaj uređaj
+    ├─ nalog ne postoji ILI status != active
+    │    → ista poruka kao za pogrešnu lozinku, isto trajanje odgovora
+    ├─ lockedUntil u budućnosti
+    │    → "Previše pokušaja. Pokušajte ponovo za N minuta."
+    ├─ lozinka pogrešna
+    │    → failedCount++, na 5 → lockedUntil = sada + 15 min
+    │    → zapis login_failed
+    └─ lozinka ispravna
+         → failedCount = 0, lockedUntil = prazno
+         → red u Devices, lastLoginAt upisan
+         → { sessionToken, deviceToken?, user:{name,email,role} }
+         → ako je broj iteracija u bazi manji od tekućeg, preračunaj hash
 
-3. Ekran traži: kod  +  [x] Zapamti ovaj uređaj  +  naziv uređaja
+ISTEK SESIJE
+  ima deviceToken → refreshSession() tiho
+  nema           → nazad na /login
 
-4. redeemLoginCode(email, code, deviceLabel, remember)   [javna akcija]
-   ├─ najviše 5 pokušaja po kodu, pa se kod poništava
-   └─ uspeh → red u Devices
-             → { sessionToken, deviceToken?, user:{name,email,role} }
-             → upiši lastLoginAt, zapiši login_succeeded
+PROMENA LOZINKE  (sam korisnik, ekran /profil)
+  stara + nova + potvrda → svi uređaji opozvani → ponovna prijava
 
-5. Frontend čuva tokene u localStorage (isto mesto gde je sada admin token)
+ZABORAVLJENA LOZINKA
+  email → uvek ista poruka bez obzira na postojanje naloga
+        → ako nalog postoji i aktivan je, mejl sa linkom (48h)
 
-6. Istek sesije:  ima deviceToken → refreshSession() tiho, bez mejla
-                  nema         → nazad na korak 1
+RESET OD STRANE ADMINA
+  Dugme "Pošalji link za novu lozinku" → isti mejl
+  Stara lozinka prestaje da važi tek kada korisnik postavi novu
 ```
-
-Dve javne akcije zahtevaju izmenu u `Code.gs`, koji trenutno poziva
-`resolveAuth` pre svakog dispatch-a (linija 30). Uvodi se lista
-`PUBLIC_ACTIONS = ['requestLoginCode', 'redeemLoginCode']` koja se dispatchuje
-sa `authCtx = null`. To je jedina tačka u kojoj se probija postojeće pravilo
-"sve je autentikovano", pa je vredna posebne pažnje u pregledu koda.
 
 ---
 
-## 7. Ekran za administraciju
+## 8. Ekran za administraciju
 
 Ruta `/admin/users`, u navigaciji vidljiva samo kada je `state.user.role === 'admin'`.
 
 > Skrivanje dugmeta **nije** zaštita. Svaka `user*` akcija proverava ulogu na
 > serveru, jer klijent može poslati bilo šta. Spesenov `README.md` to izričito
 > navodi i to je ispravno.
-
-### Lista korisnika
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -259,37 +332,90 @@ Ruta `/admin/users`, u navigaciji vidljiva samo kada je `state.user.role === 'ad
 │  Poslednja prijava: pre 2 sata · 2 uređaja                           │
 ├──────────────────────────────────────────────────────────────────────┤
 │  Ana Anić                                                  ⋮         │
-│  ana@firma.rs · Inspektor · Aktivna · još se nije prijavila          │
-│  1 uređaj                                                            │
+│  ana@firma.rs · Inspektor · Aktivna · još nije postavila lozinku     │
+│  Link poslat 12.03.2026.                                             │
 ├──────────────────────────────────────────────────────────────────────┤
 │  Petar Petrović                                            ⋮         │
-│  petar@firma.rs · Inspektor · Ugašen                                 │
+│  petar@firma.rs · Inspektor · Zaključan do 14:32                     │
+│  5 neuspelih pokušaja                                                │
+├──────────────────────────────────────────────────────────────────────┤
+│  Jovana Jovanović                                          ⋮         │
+│  jovana@firma.rs · Inspektor · Ugašen                                │
 │  Ugasio: Marko Marković, 12.03.2026.                                 │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Filteri: *Svi · Aktivni · Ugašeni · Administratori · Još se nisu prijavili*.
+Filteri: *Svi · Aktivni · Ugašeni · Administratori · Bez lozinke · Zaključani*.
 
 ### Akcije po korisniku (meni `⋮`)
 
 | Akcija | Ponašanje |
 |---|---|
-| **Ugasi pristup** | Modal sa potvrdom. Postavlja `status: disabled` i **odmah opoziva sve uređaje** te osobe. |
+| **Ugasi pristup** | Modal sa potvrdom. `status: disabled` i **odmah opoziva sve uređaje**. |
 | **Vrati pristup** | `status: active`. Uređaji se ne vraćaju — osoba se prijavljuje ponovo. |
 | **Daj admin prava** | Modal sa potvrdom i jasnim tekstom šta admin može. |
 | **Oduzmi admin prava** | Isto, uz upozorenje ako je to poslednji admin. |
+| **Pošalji link za novu lozinku** | Jednokratan link, 48 sati. |
+| **Otključaj nalog** | Vidljivo samo kad je nalog zaključan; briše `lockedUntil` i `failedCount`. |
 | **Uređaji** | Panel: naziv, poslednji put korišćen, datum isteka. Po redu *Odjavi*, i *Odjavi sve*. |
-| **Istorija** | Zapisi iz `AuditLog` za tog korisnika — ko ga je otvorio, kada je gašen i vraćan, prijave. |
-
-### Dodavanje korisnika
-
-Ime, email, uloga. Kreira red sa `status: active`, šalje mejl dobrodošlice sa
-linkom na aplikaciju i objašnjenjem da se prijavljuje mejlom i kodom. Badge
-*još se nije prijavio* stoji dok `lastLoginAt` ne dobije vrednost.
+| **Istorija** | Zapisi iz `AuditLog` za tog korisnika. |
 
 ---
 
-## 8. Zaštitne ograde
+## 9. Vidljivost inspekcija — "inspektor vidi samo svoje"
+
+Ova odluka ima jednu posledicu koju treba rešiti u dizajnu, jer bi se inače
+pojavila tek u upotrebi.
+
+### Problem: `createdBy` nije isto što i "čija je inspekcija"
+
+Danas `createInspection` upisuje `createdBy` (`InspectionService.gs:61`). Ako se
+vidljivost veže samo za to polje, nastaje situacija u kojoj **admin otvori
+inspekciju i time je učini nevidljivom za inspektora koji treba da je odradi**.
+A upravo je to najverovatniji način rada: kancelarija zavodi posao, inspektor
+izlazi na teren.
+
+### Rešenje
+
+Nova kolona `assignedTo` na listu `Inspections`, i pravilo:
+
+```
+inspektor vidi inspekciju  ⇔  assignedTo == ja  ILI  createdBy == ja
+admin vidi sve
+```
+
+- `createInspection` postavlja `assignedTo` iz forme; ako polje nije popunjeno,
+  podrazumeva se onaj ko kreira.
+- U ekranu za kreiranje: padajuća lista aktivnih korisnika.
+- U detaljima inspekcije: akcija **Dodeli** (samo admin), sa zapisom
+  `inspection_assigned` u audit.
+
+### Tačke u kodu koje se menjaju
+
+Postojeći `requireMatchingInspection` ograničava **samo** stanare
+(`Authservice.gs:195` — uslov je `authCtx.role === 'tenant'`). Uvodi se
+`requireInspectionAccess(authCtx, inspectionId)` koji pokriva sve tri uloge, i
+zamenjuje postojeći poziv na ovim mestima:
+
+| Fajl | Funkcija |
+|---|---|
+| `InspectionService.gs` | `getInspection`, `saveSection` |
+| `AttachmentService.gs` | `uploadAttachment` |
+| `SignatureService.gs` | `saveSignature` |
+| `InspectionService.gs` | `listInspections` — filtriranje liste, ne odbijanje |
+
+Ovo je najlakše mesto da se propusti jedan poziv i ostavi rupa, pa je i
+najvažnije mesto za test scenarije 12–15 iz sekcije 15.
+
+### Podrazumevano ponašanje za postojeće redove
+
+Pri migraciji `assignedTo` se popunjava vrednošću iz `createdBy`. Redovi kod
+kojih je `createdBy` stara oznaka tokena (`admin:...`) ostaju vidljivi samo
+adminima — što je i ispravno, jer se za njih ne zna ko ih je stvarno radio.
+
+---
+
+## 10. Zaštitne ograde
 
 Bez ovih pravila jedan pogrešan klik ostavlja firmu bez pristupa sopstvenom sistemu.
 
@@ -297,60 +423,76 @@ Bez ovih pravila jedan pogrešan klik ostavlja firmu bez pristupa sopstvenom sis
 2. **Korisnik ne može sebi da oduzme admin prava.**
 3. **Poslednji aktivan admin ne može biti ugašen ni demovan.** Pravila 1 i 2 to
    uglavnom već sprečavaju, ali provera se piše eksplicitno — kao odbrana od
-   budućih akcija (na primer brisanja korisnika) koje bi zaobišle tu logiku.
+   budućih akcija (na primer brisanja korisnika) koje bi tu logiku zaobišle.
 4. **Break-glass ostaje.** Funkcija `bootstrapFirstAdmin(email, name)` ostaje u
-   editoru zauvek, ne samo za prvo postavljanje. Ako poslednjem adminu prestane
-   da radi mejl ili izgubi sve uređaje, to je jedini put nazad. Ovo je stvarna
-   rupa u modelu "sve iz UI" i treba je pokriti svesno, a ne slučajno.
-5. **Email je jedinstven**, poređenje bez razlike u veličini slova. Duplikat se
-   odbija sa jasnom porukom.
+   editoru zauvek, ne samo za prvo postavljanje. Ako poslednji admin izgubi
+   lozinku i pristup mejlu, to je jedini put nazad. Ovo je stvarna rupa u modelu
+   "sve iz UI" i treba je pokriti svesno, a ne slučajno.
+5. **Email je jedinstven**, poređenje bez razlike u veličini slova.
 6. **Svaka mutacija piše u `AuditLog`** sa punim identitetom onoga ko ju je izvršio.
+7. **Poruka o neuspeloj prijavi je uvek ista** — nepostojeći nalog, pogrešna
+   lozinka i ugašen nalog daju identičan odgovor. Inače se lista zaposlenih
+   otkriva probanjem mejlova.
 
 ---
 
-## 9. Ograničenja učestalosti
+## 11. Ograničenja učestalosti i zaključavanje
 
 Apps Script ne daje pouzdanu IP adresu pozivaoca, pa je jedini realan ključ mejl.
 
 | Akcija | Ograničenje |
 |---|---|
-| `requestLoginCode` | 1 zahtev na 60 sekundi po mejlu (da se ne zatrpava inbox) |
-| `requestLoginCode` | najviše 5 na sat po mejlu |
-| `redeemLoginCode` | 5 pogrešnih pokušaja → kod se poništava |
-| `redeemLoginCode` | 10 neuspelih na sat po mejlu → pauza 15 minuta |
+| `login` | 5 uzastopnih promašaja → `lockedUntil` = sada + 15 minuta |
+| `login` | brojač se nuluje pri uspešnoj prijavi |
+| `requestPasswordReset` | 1 na 60 sekundi i najviše 5 na sat po mejlu |
+| `setPassword` | token jednokratan, važi 48 sati |
 
-Brojači u `CacheService`. Poslednje pravilo je ekvivalent Spesenovih kolona
-`Fehler` i `GesperrtBis`, samo bez pisanja u tabelu.
+`failedCount` i `lockedUntil` idu u list `Users` (kao Spesenove `Fehler` i
+`GesperrtBis`) jer moraju preživeti restart i biti vidljivi adminu u UI.
+Brojači za reset lozinke idu u `CacheService`.
+
+Zaključavanje je u ovom modelu **obavezno**, ne opciono — vidi sekciju 5.
 
 **Napomena o kvotama:** `MailApp` ima dnevni limit — 100 primalaca za obične
-Gmail naloge, 1500 za Workspace. Za očekivan broj prijava to je daleko iznad
-potrebe, ali vredi znati da limit postoji. Mejlovi stižu sa adrese vlasnika
-skripte, pa prvi test treba da obuhvati i proveru da ne završavaju u spamu.
+Gmail naloge, 1500 za Workspace. Za očekivan broj mejlova to je daleko iznad
+potrebe. Mejlovi stižu sa adrese vlasnika skripte, pa prvi test treba da obuhvati
+i proveru da ne završavaju u spamu.
 
 ---
 
-## 10. Nove API akcije
+## 12. Nove API akcije
 
-Dodaju se u `Router.gs`. Sve osim prve dve zahtevaju `requireAdmin`.
+Dodaju se u `Router.gs`.
 
 ```
-requestLoginCode(email)                              javno
-redeemLoginCode(email, code, deviceLabel, remember)  javno
-refreshSession()                                     token uređaja
-me()                                                 bilo koja sesija
+login(email, password, deviceLabel, remember)     javno
+requestPasswordReset(email)                       javno
+setPassword(setpwToken, newPassword)              javno
+refreshSession()                                  token uređaja
+me()                                              bilo koja sesija
+changePassword(oldPassword, newPassword)          bilo koja sesija
 
-listUsers(filter)                                    admin
-createUser(name, email, role)                        admin
-setUserStatus(userId, status)                        admin
-setUserRole(userId, role)                            admin
-listUserDevices(userId)                              admin
-revokeDevice(deviceId)                               admin
-getAuthLog(userId?)                                  admin
+listUsers(filter)                                 admin
+createUser(name, email, role)                     admin
+setUserStatus(userId, status)                     admin
+setUserRole(userId, role)                         admin
+unlockUser(userId)                                admin
+sendPasswordLink(userId)                          admin
+listUserDevices(userId)                           admin
+revokeDevice(deviceId)                            admin
+assignInspection(inspectionId, userEmail)         admin
+getAuthLog(userId?)                               admin
 ```
+
+Prve tri su javne, a `Code.gs` trenutno poziva `resolveAuth` pre svakog
+dispatch-a (linija 30). Uvodi se lista
+`PUBLIC_ACTIONS = ['login', 'requestPasswordReset', 'setPassword']` koja se
+dispatchuje sa `authCtx = null`. To je jedina tačka u kojoj se probija postojeće
+pravilo "sve je autentikovano", pa zaslužuje posebnu pažnju u pregledu koda.
 
 ---
 
-## 11. Migracija — četiri faze, svaka isporučiva zasebno
+## 13. Migracija — četiri faze, svaka isporučiva zasebno
 
 **Faza 0 — odmah, nezavisno od svega ostalog**
 Opozvati kompromitovani admin token iz `gas/BootstrapService.gs:202`
@@ -358,89 +500,106 @@ Opozvati kompromitovani admin token iz `gas/BootstrapService.gs:202`
 Ovo ne čeka ostatak posla.
 
 **Faza 1 — temelji, bez vidljive promene**
-Listovi `Users` i `Devices`, `UserService.gs`, `DeviceService.gs`, novi tipovi
-tokena. `resolveAuth` prihvata **i** stari admin token **i** novu sesiju.
-Ništa se ne kvari, niko ništa ne primećuje.
+Listovi `Users` i `Devices`, kolona `assignedTo`, `UserService.gs`,
+`PasswordService.gs`, `DeviceService.gs`, novi tipovi tokena. `resolveAuth`
+prihvata **i** stari admin token **i** novu sesiju. Ništa se ne kvari, niko ništa
+ne primećuje. Ovde se radi i merenje broja iteracija iz sekcije 5.
 
 **Faza 2 — ekran i prelazak ljudi**
-`/admin/users`, novi ekran za prijavu, upisati prave korisnike. Svi prelaze na
-novu prijavu. Stari token i dalje radi kao mreža za pad.
+`/admin/users`, novi ekran za prijavu, ekran za postavljanje lozinke. Upisati
+prave korisnike, poslati linkove. Svi prelaze na novu prijavu. Stari token i
+dalje radi kao mreža za pad.
 
-**Faza 3 — čišćenje**
-Izbaciti granu sa `ADMIN_NONCES` iz `resolveAuth`, obrisati
+**Faza 3 — čišćenje i zatvaranje vidljivosti**
+Uključiti filtriranje po `assignedTo` (do tada svi vide sve, da prelazak ne bi
+sakrio nekome posao). Izbaciti granu sa `ADMIN_NONCES` iz `resolveAuth`, obrisati
 `generateAdminTokenForMe()` i `listAdminTokens()`, obrisati Script Property
-`ADMIN_NONCES`. Ažurirati `docs/api-contract.md`, koji još opisuje Google
-prijavu koje odavno nema u kodu.
+`ADMIN_NONCES`. Ažurirati `docs/api-contract.md`, koji još opisuje Google prijavu
+koje odavno nema u kodu.
+
+Redosled u fazi 3 je namerno takav: prvo svi imaju naloge i prijavljuju se, pa
+tek onda vidljivost postaje uža. Obrnut redosled znači da nekome nestane posao sa
+ekrana usred radnog dana.
 
 ---
 
-## 12. Procena obima
+## 14. Procena obima
 
 | Deo | Fajl | Približno linija |
 |---|---|---|
-| Korisnici | `gas/UserService.gs` (novo) | 230 |
+| Korisnici | `gas/UserService.gs` (novo) | 260 |
+| Lozinke i PBKDF2 | `gas/PasswordService.gs` (novo) | 160 |
 | Uređaji | `gas/DeviceService.gs` (novo) | 120 |
-| Mejlovi | `gas/MailService.gs` (novo) | 80 |
-| Izmene autentikacije | `gas/Authservice.gs` | 130 |
+| Mejlovi | `gas/MailService.gs` (novo) | 90 |
+| Izmene autentikacije | `gas/Authservice.gs` | 150 |
+| Vidljivost inspekcija | `InspectionService`, `AttachmentService`, `SignatureService` | 90 |
 | Javne akcije | `gas/Code.gs` | 15 |
-| Rute | `gas/Router.gs` | 10 |
-| Listovi i CRUD | `gas/SheetService.gs` | 150 |
-| Ekran za administraciju | `js/pages.js` | 320 |
-| Novi ekran za prijavu | `js/pages.js` | 150 |
-| Klijentska logika | `js/auth.js`, `api.js`, `state.js` | 120 |
-| **Ukupno** | | **~1330** |
+| Rute | `gas/Router.gs` | 16 |
+| Listovi i CRUD | `gas/SheetService.gs` | 170 |
+| Ekran za administraciju | `js/pages.js` | 340 |
+| Prijava, postavljanje i promena lozinke | `js/pages.js` | 260 |
+| Klijentska logika | `js/auth.js`, `api.js`, `state.js` | 130 |
+| **Ukupno** | | **~1800** |
 
-Realna procena: **3–4 dana** fokusiranog rada za implementaciju, plus **1 dan**
-za prolazak kroz test scenarije iz tačke 13.
+Realna procena: **5–6 dana** fokusiranog rada, plus **1 dan** za prolazak kroz
+test scenarije. Model lozinke je oko dva dana skuplji od modela sa kodom na mejl
+— razlika su ekrani za postavljanje, promenu i reset, plus merenje i podešavanje
+PBKDF2.
 
 ---
 
-## 13. Test scenariji pre puštanja u rad
+## 15. Test scenariji pre puštanja u rad
 
-Preuzet obrazac iz Spesenovog `README.md` — tamo se pokazao kao koristan.
+Obrazac preuzet iz Spesenovog `README.md`, gde se pokazao kao koristan.
 
 | # | Scenario | Očekivano |
 |---|---|---|
-| 1 | Prijava mejlom koji ne postoji | Ista poruka kao za postojeći; nijedan mejl ne stiže |
-| 2 | Pogrešan kod pet puta | Šesti pokušaj odbijen i sa ispravnim kodom |
-| 3 | Kod posle 10 minuta | Odbijen |
-| 4 | Isti kod dva puta | Drugi put odbijen |
-| 5 | Prijava bez "Zapamti uređaj" | Posle 12 sati traži novi kod |
-| 6 | Prijava sa "Zapamti uređaj" | Posle 12 sati se obnavlja tiho, bez mejla |
-| 7 | Admin ugasi prijavljenog korisnika | Njegov sledeći zahtev odbijen u roku od minuta |
-| 8 | Admin oduzme admin prava prijavljenom adminu | Ekran `/admin/users` mu nestaje, akcije odbijene |
-| 9 | Običan korisnik ručno pošalje `listUsers` | `FORBIDDEN` |
-| 10 | Admin pokuša da ugasi sebe | Odbijeno |
-| 11 | Admin pokuša da sebi oduzme prava | Odbijeno |
-| 12 | Pokušaj da se ugasi poslednji admin | Odbijeno sa jasnim objašnjenjem |
-| 13 | Dodavanje korisnika sa postojećim mejlom | Odbijeno |
-| 14 | Odjava jednog uređaja | Taj uređaj traži prijavu, drugi nastavlja da radi |
-| 15 | Link stanara `?t=` | Radi nepromenjeno kroz sve faze |
-| 16 | Zapis u `AuditLog` posle izmene inspekcije | `actor` je mejl osobe, ne oznaka uređaja |
+| 1 | Prijava mejlom koji ne postoji | Ista poruka i isto trajanje kao za pogrešnu lozinku |
+| 2 | Pogrešna lozinka pet puta | Šesti pokušaj odbijen i sa ispravnom lozinkom |
+| 3 | Posle 15 minuta | Prijava ponovo moguća |
+| 4 | Admin klikne "Otključaj nalog" | Prijava odmah moguća |
+| 5 | Link za postavljanje lozinke upotrebljen dvaput | Drugi put odbijen |
+| 6 | Link stariji od 48 sati | Odbijen |
+| 7 | Lozinka od 11 znakova | Odbijena, sa jasnom porukom |
+| 8 | Promena lozinke | Drugi uređaj traži ponovnu prijavu |
+| 9 | Prijava bez "Zapamti uređaj" | Posle 12 sati traži lozinku |
+| 10 | Prijava sa "Zapamti uređaj" | Posle 12 sati se obnavlja tiho |
+| 11 | Odjava jednog uređaja | Taj uređaj traži prijavu, drugi nastavlja da radi |
+| 12 | Inspektor otvori tuđu inspekciju preko URL-a | `FORBIDDEN` |
+| 13 | Inspektor pošalje `saveSection` za tuđu inspekciju | `FORBIDDEN` |
+| 14 | Inspektor pošalje `uploadAttachment` za tuđu inspekciju | `FORBIDDEN` |
+| 15 | Admin kreira inspekciju i dodeli je inspektoru | Inspektor je vidi u svojoj listi |
+| 16 | Admin ugasi prijavljenog korisnika | Njegov sledeći zahtev odbijen u roku od minuta |
+| 17 | Admin oduzme admin prava prijavljenom adminu | `/admin/users` mu nestaje, akcije odbijene |
+| 18 | Običan korisnik ručno pošalje `listUsers` | `FORBIDDEN` |
+| 19 | Admin pokuša da ugasi sebe | Odbijeno |
+| 20 | Admin pokuša da sebi oduzme prava | Odbijeno |
+| 21 | Pokušaj gašenja poslednjeg admina | Odbijeno sa jasnim objašnjenjem |
+| 22 | Dodavanje korisnika sa postojećim mejlom | Odbijeno |
+| 23 | Link stanara `?t=` | Radi nepromenjeno kroz sve faze |
+| 24 | Zapis u `AuditLog` posle izmene inspekcije | `actor` je mejl osobe, ne oznaka uređaja |
 
 Scenario 2 zaključava nalog na 15 minuta — raditi ga sa testnim nalogom.
+Scenariji 12–15 pokrivaju najlakše mesto za previd iz sekcije 9.
 
 ---
 
-## 14. Sporedna korist
+## 16. Sporedna korist
 
 Uz ovaj posao rešavaju se i tri nalaza iz ranije analize prijave, bez dodatnog truda:
 
 - `Utils.randomHex` koristi `Math.random()`, koji nije kriptografski generator, a
-  proizvodi sve nonce-ove. Novi kod za generisanje kodova i nonce-ova uvodi
-  izvor zasnovan na `Utilities.getUuid()`, koji zamenjuje i postojeću upotrebu.
+  proizvodi sve nonce-ove. Nova funkcija za salt i nonce-ove zasnovana na
+  `Utilities.getUuid()` zamenjuje i postojeću upotrebu.
 - Token uređaja od 60 dana zamenjuje admin token od 365 dana.
 - `actor` u celom `AuditLog`-u postaje ime osobe umesto slobodnog teksta iz tokena.
 
 ---
 
-## 15. Pitanja na koja treba tvoj odgovor pre početka
+## 17. Šta ostaje otvoreno
 
-1. **Uloge** — da li su dovoljne `admin` i `inspector`, ili treba i `viewer`
-   (samo čitanje, bez izmene inspekcija)?
-2. **Kredencijal** — potvrđuješ opciju B (kod na mejl), ili preferiraš A zbog
-   doslednosti sa Spesenom, odnosno C ako su svi na Google Workspace-u?
-3. **Trajanje uređaja** — 30, 60 ili 90 dana?
-4. **Vidljivost inspekcija** — sada svaki admin vidi sve. Treba li inspektor da
-   vidi samo svoje inspekcije, ili i dalje sve? Ovo utiče na `listInspections` i
-   nije obuhvaćeno gornjom procenom obima.
+1. **Broj PBKDF2 iteracija** — određuje se merenjem u fazi 1, ne odlukom unapred.
+2. **Trajanje tokena uređaja** — predlog 60 dana; menja se jednim brojem u `Config`.
+3. **Da li inspektor sme sam da kreira inspekciju**, ili samo da radi dodeljene.
+   Predlog je da sme, uz automatsko `assignedTo = on sam`. Ako ne sme,
+   `createInspection` dobija `requireAdmin` i ekran za kreiranje se skriva.
