@@ -98,29 +98,58 @@ const SheetService = (function () {
     return row;
   }
 
+  /**
+   * Rows already read during this execution.
+   *
+   * Every getValues() is a separate round trip to the Sheets backend, and a
+   * single request reads the same sheet several times over: resolving auth
+   * touches Users and Devices, then the handler walks Answers, Attachments and
+   * Signatures, and a projection may go back to Users again for display names.
+   *
+   * An Apps Script execution serves one request and then dies, so this cache
+   * cannot outlive the request or go stale between requests — the failure mode
+   * that makes caching sheet data dangerous elsewhere does not exist here. It
+   * only has to stay honest *within* a request, which is what the invalidation
+   * on every write is for.
+   */
+  let _rowCache = {};
+
+  function _invalidate(sheetName) {
+    delete _rowCache[sheetName];
+  }
+
   function _getAllRows(sheetName) {
+    if (_rowCache[sheetName]) return _rowCache[sheetName];
+
     const sheet = _sheet(sheetName);
     const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) return [];
-    const range = sheet.getRange(2, 1, lastRow - 1, COLUMNS[sheetName].length);
-    return range.getValues();
+    const rows = lastRow <= 1
+      ? []
+      : sheet.getRange(2, 1, lastRow - 1, COLUMNS[sheetName].length).getValues();
+
+    _rowCache[sheetName] = rows;
+    return rows;
   }
 
   /**
    * Find row by primary key column. Returns { rowIndex (1-based, including header), data } or null.
+   *
+   * Reads the whole sheet rather than a key column followed by the matching
+   * row. That is one round trip instead of two, and the rows are then shared
+   * with every other lookup in the same request.
    */
   function _findRowByKey(sheetName, keyColumn, keyValue) {
-    const sheet = _sheet(sheetName);
     const colIndex = COLUMNS[sheetName].indexOf(keyColumn);
     if (colIndex < 0) throw new Error(`Column ${keyColumn} not in ${sheetName}`);
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) return null;
-    const colValues = sheet.getRange(2, colIndex + 1, lastRow - 1, 1).getValues();
-    for (let i = 0; i < colValues.length; i++) {
-      if (String(colValues[i][0]) === String(keyValue)) {
-        const rowIndex = i + 2; // +1 for 1-based, +1 for header
-        const fullRow = sheet.getRange(rowIndex, 1, 1, COLUMNS[sheetName].length).getValues()[0];
-        return { rowIndex, data: _rowToObject(sheetName, fullRow) };
+
+    const rows = _getAllRows(sheetName);
+    const needle = String(keyValue);
+    for (let i = 0; i < rows.length; i++) {
+      if (String(rows[i][colIndex]) === needle) {
+        return {
+          rowIndex: i + 2, // +1 for 1-based, +1 for header
+          data: _rowToObject(sheetName, rows[i]),
+        };
       }
     }
     return null;
@@ -130,12 +159,14 @@ const SheetService = (function () {
     const sheet = _sheet(sheetName);
     const row = _objectToRow(sheetName, obj);
     sheet.appendRow(row);
+    _invalidate(sheetName);
   }
 
   function _updateRow(sheetName, rowIndex, obj) {
     const sheet = _sheet(sheetName);
     const row = _objectToRow(sheetName, obj);
     sheet.getRange(rowIndex, 1, 1, COLUMNS[sheetName].length).setValues([row]);
+    _invalidate(sheetName);
   }
 
   // ============================================================
@@ -281,6 +312,7 @@ const SheetService = (function () {
           String(data[i][2]) === itemId) {
         const colIndex = COLUMNS.Answers.indexOf('attachmentCount') + 1;
         sheet.getRange(i + 2, colIndex).setValue(count);
+        _invalidate('Answers');
         return;
       }
     }
@@ -324,6 +356,7 @@ const SheetService = (function () {
         invalidated.push(data[i][COLUMNS.Signatures.indexOf('signatureId')]);
       }
     }
+    if (invalidated.length) _invalidate('Signatures');
     return invalidated;
   }
 
@@ -462,6 +495,7 @@ const SheetService = (function () {
         revoked.push(String(data[i][deviceIdIdx]));
       }
     }
+    if (revoked.length) _invalidate('Devices');
     return revoked;
   }
 
