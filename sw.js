@@ -8,11 +8,21 @@
  * Bump CACHE_VERSION whenever app shell files change.
  */
 
-// v2: accounts and password sign-in — app.js, auth.js, api.js, state.js,
-// pages.js and components.css all changed. Without the bump, anyone who has
-// already opened the app keeps being served the old sign-in screen from cache,
-// which then calls actions the new backend has replaced.
-const CACHE_VERSION = 'handover-v2';
+/**
+ * The cache key is a digest of the shell files themselves, not a number someone
+ * remembers to raise.
+ *
+ * It was a number once, and it went wrong exactly the way you would expect: the
+ * accounts release bumped it, the release after that changed pages.js and did
+ * not, and every returning browser kept serving the previous screen from cache
+ * while the backend behind it had already moved on. Nothing looked broken from
+ * the outside — the app just quietly stayed one version behind.
+ *
+ * Regenerate by running `node tests/run.js`; the shell-cache check prints the
+ * value to paste in when it no longer matches.
+ */
+const SHELL_HASH = '20f1e3f54f3c';
+const CACHE_VERSION = `handover-${SHELL_HASH}`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
