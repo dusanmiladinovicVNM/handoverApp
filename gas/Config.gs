@@ -46,29 +46,26 @@ const Config = (function () {
 
   // --- From Config sheet (live, editable) ---
 
+  // Held for the life of one execution, which is the life of one request —
+  // module state does not survive between them, so the TTL this once carried
+  // could never expire and never applied. Reads go through SheetService so the
+  // workbook is opened once per request rather than once here and once there.
   let _configCache = null;
-  let _configCacheAt = 0;
-  const CONFIG_CACHE_TTL_MS = 30 * 1000; // 30 sec
 
   function _loadConfigSheet() {
-    const now = Date.now();
-    if (_configCache && (now - _configCacheAt) < CONFIG_CACHE_TTL_MS) {
-      return _configCache;
-    }
-    const sheet = SpreadsheetApp.openById(getWorkbookId()).getSheetByName('Config');
-    if (!sheet) {
-      _configCache = {};
-      _configCacheAt = now;
-      return _configCache;
-    }
-    const data = sheet.getDataRange().getValues();
+    if (_configCache) return _configCache;
+
     const map = {};
-    for (let i = 1; i < data.length; i++) {
-      const [key, value] = data[i];
-      if (key) map[String(key)] = String(value);
+    try {
+      SheetService.getConfigRows().forEach(row => {
+        if (row.key) map[String(row.key)] = String(row.value);
+      });
+    } catch (e) {
+      // A missing or unreadable Config sheet means every getter falls back to
+      // its default, which is a working app rather than a broken one.
+      Utils.log('WARN', 'Config sheet unreadable, using defaults', { error: e.message });
     }
     _configCache = map;
-    _configCacheAt = now;
     return _configCache;
   }
 
@@ -86,7 +83,6 @@ const Config = (function () {
 
   function invalidateCache() {
     _configCache = null;
-    _configCacheAt = 0;
   }
 
   // --- Convenience getters for common config keys ---

@@ -474,6 +474,20 @@ const SheetService = (function () {
   }
 
   // ============================================================
+  // Config
+  // ============================================================
+
+  /**
+   * The Config sheet as rows, through the same handle and cache as everything
+   * else. Config used to open the workbook itself, which meant a second
+   * SpreadsheetApp.openById on every execution for a sheet the request was
+   * usually going to touch anyway.
+   */
+  function getConfigRows() {
+    return _getAllRows('Config').map(r => _rowToObject('Config', r));
+  }
+
+  // ============================================================
   // Diagnostics
   // ============================================================
 
@@ -573,6 +587,7 @@ const SheetService = (function () {
     getDevicesForUser,
     listDevices,
     revokeDevicesForUser,
+    getConfigRows,
     // Diagnostics
     highestIdSuffix,
   };
