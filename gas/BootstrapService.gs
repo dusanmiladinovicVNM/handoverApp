@@ -58,6 +58,7 @@ function _seedMissingConfigKeys(ss) {
     ['loginMaxFailures', '5', 'Failed sign-ins before an account locks'],
     ['loginLockMinutes', '15', 'How long an account stays locked'],
     ['authCacheTtlSeconds', '60', 'How long a cached user or device row is trusted'],
+    ['slowRequestMs', '5000', 'Requests slower than this record their timing in AuditLog; 0 logs all'],
   ];
 
   const sheet = ss.getSheetByName('Config');

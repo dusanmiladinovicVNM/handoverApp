@@ -117,22 +117,33 @@ const Config = (function () {
    * PBKDF2 work factor.
    *
    * The default is deliberately low. Measure on the real deployment with
-   * benchmarkPbkdf2() and raise this to the largest value that keeps login
-   * under one second — see docs/user-administration-proposal.md, section 5.
+   * benchmarkPbkdf2() and set this to what it prints — the largest value that
+   * keeps a sign-in near 2.5 s, which on this deployment is around 3000.
+   *
    * Raising it does not invalidate existing passwords: the iteration count is
-   * stored alongside each hash and old rows are upgraded on next login.
+   * stored alongside each hash and old rows are upgraded on next login. So
+   * leaving it below the measurement buys nothing and costs the difference.
    */
   function getPbkdf2Iterations() {
     return getNumber('pbkdf2Iterations', 1000);
   }
 
   /**
-   * Sixteen, not the twelve first proposed. Measurement on the real deployment
-   * put a PBKDF2 iteration at ~2.5 ms, almost all of it the JavaScript/platform
-   * boundary — a cost the attacker does not pay. The reachable work factor is
-   * therefore low enough that length, not the derivation, is what protects
-   * these accounts. At sixteen characters people write a phrase instead of a
-   * word, which is worth far more here than any number of iterations.
+   * Sixteen, not the twelve first proposed.
+   *
+   * A PBKDF2 iteration costs ~0.7 ms here, almost all of it the
+   * JavaScript/platform boundary — a cost the attacker does not pay, since
+   * native code pays only for the SHA-256. Even at 3000 iterations a guess
+   * against a stolen sheet costs the attacker roughly 6000 SHA-256 operations,
+   * which a GPU does by the million per second.
+   *
+   * So length, not the derivation, is what protects these accounts. At sixteen
+   * characters people write a phrase instead of a word, and that is worth more
+   * than any iteration count reachable on this platform.
+   *
+   * (An earlier version of this comment cited 2.5 ms, from a benchmark that
+   * timed a cold pass. The figure was wrong by a factor of four; the conclusion
+   * it supported was not.)
    */
   function getPasswordMinLength() {
     return getNumber('passwordMinLength', 16);
@@ -163,6 +174,18 @@ const Config = (function () {
     return getNumber('authCacheTtlSeconds', 60);
   }
 
+  /**
+   * A request slower than this records its own timing breakdown in AuditLog.
+   *
+   * Set to 0 to record every request. Occasional outliers are the ones worth
+   * catching, and they are rare enough that the extra write costs nothing in
+   * aggregate — while an always-on log would add a write to every call in order
+   * to study the few that matter.
+   */
+  function getSlowRequestMs() {
+    return getNumber('slowRequestMs', 5000);
+  }
+
   return {
     getWorkbookId,
     getInspectionsRootFolderId,
@@ -186,5 +209,6 @@ const Config = (function () {
     getLoginMaxFailures,
     getLoginLockMinutes,
     getAuthCacheTtlSeconds,
+    getSlowRequestMs,
   };
 })();
