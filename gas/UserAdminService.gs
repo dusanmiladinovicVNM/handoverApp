@@ -221,8 +221,11 @@ const UserAdminService = (function () {
    * Hand an inspection to someone.
    *
    * Needed because createdBy is not ownership: the office commonly opens a job
-   * that an inspector goes out to do, and from phase 3 onward this column is
-   * what decides who can see it.
+   * that an inspector goes out to do, and this column is what decides who can
+   * see it — see AuthService.requireInspectionAccess.
+   *
+   * Reassigning therefore takes an inspection away from whoever had it. That is
+   * the point, and it is admin-only for the same reason.
    */
   function assignInspection(authCtx, data) {
     AuthService.requireAdmin(authCtx);

@@ -1076,9 +1076,9 @@ export function pageAdminList() {
                           i.tenantName || '(no tenant)', ' · ',
                           formatDate(i.updatedAt),
                         ),
-                        // Shown to admins only. An inspector's list will soon
-                        // contain nothing but their own work, where repeating
-                        // their name on every row says nothing.
+                        // Shown to admins only. An inspector's list contains
+                        // nothing but their own work, where repeating their
+                        // name on every row says nothing.
                         isAdmin() && i.assignedTo
                           ? h('div', { class: 'list-item__meta' },
                               'Assigned to ', i.assignedToName || i.assignedTo)

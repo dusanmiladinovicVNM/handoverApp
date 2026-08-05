@@ -644,16 +644,47 @@ Preostalo za pokretanje: dozvola `script.send_mail` (potrebna za pozivnice
 novim korisnicima) i `FRONTEND_URL` sa tačnim velikim i malim slovima, jer isti
 podatak gradi i linkove za stanare.
 
-**Faza 3 — čišćenje i zatvaranje vidljivosti**
-Uključiti filtriranje po `assignedTo` (do tada svi vide sve, da prelazak ne bi
-sakrio nekome posao). Izbaciti granu sa `ADMIN_NONCES` iz `resolveAuth`, obrisati
-`generateAdminTokenForMe()` i `listAdminTokens()`, obrisati Script Property
-`ADMIN_NONCES`. Ažurirati `docs/api-contract.md`, koji još opisuje Google prijavu
-koje odavno nema u kodu.
+**Faza 3 — čišćenje i zatvaranje vidljivosti** ✅ *urađeno*
 
-Redosled u fazi 3 je namerno takav: prvo svi imaju naloge i prijavljuju se, pa
-tek onda vidljivost postaje uža. Obrnut redosled znači da nekome nestane posao sa
-ekrana usred radnog dana.
+*Korak 1 — čišćenje.* Grana sa `ADMIN_NONCES` je izbačena iz `resolveAuth`,
+zajedno sa `generateAdminTokenForMe()` i `listAdminTokens()`. Dodat je ekran za
+dodelu inspekcije (`assignInspection`), pa `assignedTo` ima ko da popuni.
+
+*Korak 2 — vidljivost.* Uveden je `AuthService.requireInspectionAccess`, koji
+odgovara na pitanje na koje `requireStaff` nije ni pokušavao da odgovori: sme li
+**ovaj** pozivalac da dira **ovu** inspekciju. Tri odgovora, po jedan za svaku
+vrstu pozivaoca — stanar samo svoju, admin sve, inspektor one koje su mu
+dodeljene. `visibleInspections` primenjuje isto pravilo na listu.
+
+Dve stvari su namerno rešene onako kako nije očigledno:
+
+Inspektor za tuđu inspekciju dobija `NOT_FOUND`, isto kao za izmišljeni broj.
+Identifikatori idu redom (`INS-2026-000001`), pa bi `FORBIDDEN` značio da svako
+sa nalogom može da prošeta opseg i prebroji koliko firma radi — a to je upravo
+ono što „inspektor vidi samo svoje" treba da spreči.
+
+Lista se sužava **posle** čitanja lista, a ne kroz `filter` objekat. Taj objekat
+stiže od klijenta, a ograničenje koje klijent šalje je ograničenje koje klijent
+može i da izostavi.
+
+Neraspoređena inspekcija (`assignedTo` prazan) ostaje kod admina dok je neko ne
+dodeli — nema vlasnika sa kojim bi se poredilo.
+
+Nadzorne radnje ostaju admin-only kao i pre: ponovno otvaranje potpisane
+inspekcije, audit log i upravljanje nalozima. Uz to, samo admin sme da pri
+kreiranju upiše tuđu adresu u `assignedTo`: inspektor koji bi naveo nekog drugog
+poklonio bi inspekciju koju je upravo napravio i ne bi mogao da je vrati.
+
+Usput je ispravljeno i to što je `getSchemas` tražio `requireAdmin` — inspektor
+nije mogao ni da otvori formu za novu inspekciju, jer se spisak obrazaca nije
+učitavao.
+
+Ostaje: ažurirati `docs/api-contract.md`, koji još opisuje Google prijavu koje
+odavno nema u kodu.
+
+Redosled u fazi 3 je namerno bio takav: prvo svi imaju naloge i prijavljuju se,
+pa tek onda vidljivost postaje uža. Obrnut redosled znači da nekome nestane
+posao sa ekrana usred radnog dana.
 
 ---
 
