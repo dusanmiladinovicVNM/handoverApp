@@ -174,36 +174,63 @@ korisnici nastave da rade — njihov red se preračuna pri sledećoj uspešnoj
 prijavi, kada je lozinka u memoriji. Sa fiksnim brojem iteracija u kodu to nije
 moguće bez resetovanja svih lozinki.
 
-### Koliko iteracija
+### Koliko iteracija — izmereno
 
-**Broj se ne sme prepisati iz ovog dokumenta — mora se izmeriti na stvarnom
-deploymentu.** Svaki poziv `computeHmacSha256Signature` prelazi granicu između
-JavaScripta i native koda, i taj trošak je u Apps Scriptu znatno veći nego u
-običnom okruženju. Postupak:
+Prva verzija ovog dokumenta procenjivala je 1.000–5.000 iteracija. **Ta procena
+je bila pogrešna, i to na gore.** Merenje na stvarnom deploymentu
+(`benchmarkPbkdf2()`):
 
-1. Napisati `benchmarkPbkdf2()` u editoru, meriti 1.000, 5.000 i 20.000 iteracija.
-2. Izabrati najveći broj koji drži prijavu **ispod 1 sekunde**.
-3. Realno očekivanje je red veličine 1.000–5.000. Upisati izmerenu vrednost u `Config`.
+| Iteracija | Vreme | Po iteraciji |
+|---|---|---|
+| 1.000 | 2.516 ms | 2,52 ms |
+| 5.000 | 10.798 ms | 2,16 ms |
+| 20.000 | 52.146 ms | 2,61 ms |
+
+Dakle **oko 2,5 ms po iteraciji**, što znači svega ~400 iteracija po sekundi.
+To je red veličine gore od procene.
+
+Pošto se prijava dešava jednom u 12 sati, odnosno jednom u 60 dana na zapamćenom
+uređaju, budžet od 1 sekunde je bio nepotrebno strog. Uzeto je **2,5 sekunde**,
+što daje **1.000 iteracija** — vrednost koja ide u `Config` pod `pbkdf2Iterations`.
 
 ### Šta ovo jeste, a šta nije — bez ulepšavanja
 
-Ovo je oko **hiljadu puta skuplje** od jednog prolaza SHA-256, i to je stvarna,
-merljiva razlika. Ali to i dalje nije ni blizu onoga što daje bcrypt ili Argon2,
-gde je preporuka danas reda stotina hiljada iteracija. Okruženje jednostavno ne
-dozvoljava više.
+Ovde je važno ne prevariti se sopstvenim brojkama. Onih 2,5 ms po iteraciji
+**nije 2,5 ms posla za napadača.** Gotovo sve to je cena prelaska iz JavaScripta
+u platformu — režija koju napadač sa native kodom uopšte ne plaća. On plaća samo
+stvarni SHA-256, reda desetina nanosekundi. Odnos je otprilike 50.000:1 na našu
+štetu.
 
-**Posledica koju treba prihvatiti i nadomestiti:** u ovom modelu sigurnost
-zapravo nosi **dužina lozinke**, ne funkcija za hešovanje. Zato:
+Praktično: 1.000 iteracija znači oko 2.000 SHA-256 operacija po pokušaju. Jedna
+ozbiljna grafička karta radi reda 10¹⁰ SHA-256 u sekundi, dakle **oko 5 miliona
+pokušaja u sekundi** protiv ukradene tabele. Šta to znači:
 
-- **Minimum 12 znakova**, ne 8 kao u Spesenu. Bez pravila o velikim slovima,
-  brojevima i znakovima — ona proizvode `Lozinka1!` i smanjuju stvarnu
-  otpornost. Duža fraza od četiri reči je i lakša za pamćenje i neuporedivo jača.
-- Ekran za postavljanje lozinke pokazuje procenu jačine i **odbija** 200-tinak
-  najčešćih lozinki iz ugrađene liste.
-- Zaključavanje naloga iz sekcije 11 je ovde obavezno, a ne opcija — ono je
-  jedina odbrana od pogađanja preko mreže.
-- Radna sveska ne sme biti deljena šire nego što je nužno. Hash-evi lozinki su
-  od danas najosetljivija stvar u njoj.
+| Lozinka | Vreme da padne |
+|---|---|
+| 12 znakova, ljudski izabrana (~35 bita) | nekoliko sati |
+| 16 znakova, fraza od 4 reči (~50 bita) | nekoliko godina |
+
+Zaključak je jednoznačan i menja jednu odluku iz prve verzije: **12 znakova nije
+dovoljno.**
+
+**Sigurnost u ovom modelu nosi dužina lozinke, ne funkcija za hešovanje.** Zato:
+
+- **Minimum 16 znakova**, ne 12. Na 16 znakova čovek prestaje da piše reč i
+  počinje da piše frazu, a to vredi više od bilo kog broja iteracija. I dalje
+  bez pravila o velikim slovima i brojevima — ona proizvode `Lozinka1!`.
+- Lista čestih lozinki, kakva je prvo bila predviđena, **ovde je beskorisna** —
+  svaka lozinka na takvoj listi je kraća od 16 znakova, pa je pravilo o dužini
+  već odbija. Ono što pravilo o dužini *ne* hvata jeste način na koji ljudi to
+  zaobilaze: `password12345678`, `lozinkalozinka12`. Zato se proverava **osnova**
+  posle skidanja popune i ponavljanja.
+- Zaključavanje naloga iz sekcije 11 je obavezno, ne opcija — ono je jedina
+  odbrana od pogađanja preko mreže, gde napadač jeste plaća naših 2,5 ms.
+- **Radna sveska ne sme biti deljena šire nego što mora.** Ceo račun iznad važi
+  tek ako napadač dođe do hash-eva. Dok tabela ostaje uska, ovo je teorijski
+  rizik; čim se podeli, postaje praktičan.
+
+Ako se ispostavi da je 16 znakova preveliko opterećenje za ljude, vrednost se
+menja u `Config` pod `passwordMinLength` — ali uz svest o tabeli iznad.
 
 ### Prvo postavljanje lozinke — bez lozinke u mejlu
 
@@ -519,11 +546,14 @@ Postupak puštanja u rad, redom:
 2. `migrateAssignedTo()` — popunjava `assignedTo` na postojećim inspekcijama
 3. `benchmarkPbkdf2()` — meri i predlaže `pbkdf2Iterations`; **izmerenu
    vrednost upisati u `Config` list**
-4. `bootstrapFirstAdmin('email@firma.rs', 'Ime Prezime')` — prvi nalog
+4. `setupFirstAdmin()` — prvi nalog; adresa i ime se upisuju u dve označene
+   linije na vrhu same funkcije, jer dugme **Run** u editoru ne može da prosledi
+   argumente
 5. `smokeTest()` — provera da sve stoji
 
-Merenje iz koraka 3 nije formalnost. Podrazumeva se 1000 iteracija, što je
-namerno nisko; prava vrednost se zna tek posle merenja na samom deploymentu.
+Merenje iz koraka 3 nije formalnost — na ovom deploymentu je pokazalo da je
+prvobitna procena bila pogrešna za red veličine, i zbog toga je minimalna dužina
+lozinke podignuta sa 12 na 16 znakova. Vidi sekciju 5.
 
 **Faza 2 — ekran i prelazak ljudi**
 `/admin/users`, novi ekran za prijavu, ekran za postavljanje lozinke. Upisati

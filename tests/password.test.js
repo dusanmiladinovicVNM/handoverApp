@@ -105,12 +105,24 @@ module.exports = function run() {
 
   check('too short is rejected', () => rejects('short one', 'accepted 9 characters'));
   check('empty is rejected', () => rejects('   ', 'accepted whitespace only'));
-  check('a common password of legal length is rejected', () =>
-    rejects('password1234', 'accepted "password1234"'));
   check('a single repeated character is rejected', () =>
-    rejects('bbbbbbbbbbbbbb', 'accepted a repeated character'));
+    rejects('bbbbbbbbbbbbbbbbbb', 'accepted a repeated character'));
+
+  // The length rule already rejects every common password, since they are all
+  // shorter than the minimum. What it does not catch is how people satisfy it.
+  check('a common word padded with digits is rejected', () =>
+    rejects('password12345678', 'accepted a padded common word'));
+  check('a common word padded at the front is rejected', () =>
+    rejects('12345678password', 'accepted a front-padded common word'));
+  check('a common word repeated to length is rejected', () =>
+    rejects('lozinkalozinka12', 'accepted a repeated common word'));
+  check('padding with punctuation does not slip through', () =>
+    rejects('p-a-s-s-w-o-r-d-1234', 'accepted a common word split by punctuation'));
+
   check('a four-word passphrase is accepted', () =>
     PasswordService.validatePolicy('kisa pada trava raste'));
+  check('a long phrase containing a common word is still accepted', () =>
+    PasswordService.validatePolicy('moja lozinka za oblak i kisu'));
 
   section('Constant-time comparison:');
 

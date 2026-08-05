@@ -126,8 +126,16 @@ const Config = (function () {
     return getNumber('pbkdf2Iterations', 1000);
   }
 
+  /**
+   * Sixteen, not the twelve first proposed. Measurement on the real deployment
+   * put a PBKDF2 iteration at ~2.5 ms, almost all of it the JavaScript/platform
+   * boundary — a cost the attacker does not pay. The reachable work factor is
+   * therefore low enough that length, not the derivation, is what protects
+   * these accounts. At sixteen characters people write a phrase instead of a
+   * word, which is worth far more here than any number of iterations.
+   */
   function getPasswordMinLength() {
-    return getNumber('passwordMinLength', 12);
+    return getNumber('passwordMinLength', 16);
   }
 
   function getSessionTtlHours() {

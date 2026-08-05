@@ -120,7 +120,7 @@ function createEnvironment(overrides, options) {
     // Low on purpose: these tests are about behaviour, not work factor, and a
     // realistic setting would make the suite crawl.
     pbkdf2Iterations: 100,
-    passwordMinLength: 12,
+    passwordMinLength: 16,
     sessionTtlHours: 12,
     deviceTtlDays: 60,
     setPasswordTtlHours: 48,

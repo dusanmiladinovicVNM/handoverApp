@@ -50,8 +50,8 @@ function _seedMissingConfigKeys(ss) {
     ['imageMaxDimPx', '1600', 'Frontend should compress to this max dimension'],
     ['imageJpegQuality', '0.75', 'Frontend JPEG compression quality 0-1'],
     ['appName', 'Handover', 'Name used in outgoing email'],
-    ['pbkdf2Iterations', '1000', 'Password work factor — raise it after running benchmarkPbkdf2()'],
-    ['passwordMinLength', '12', 'Minimum password length'],
+    ['pbkdf2Iterations', '1000', 'Password work factor — set from benchmarkPbkdf2()'],
+    ['passwordMinLength', '16', 'Minimum password length — long enough to force a phrase'],
     ['sessionTtlHours', '12', 'How long a session token lasts'],
     ['deviceTtlDays', '60', 'How long a remembered device lasts'],
     ['setPasswordTtlHours', '48', 'How long a set-password link stays valid'],
@@ -328,7 +328,35 @@ function debugSaveSection(inspectionId, sessionToken) {
 // ============================================================
 
 /**
+ * ⇩⇩⇩  EDIT THE TWO LINES BELOW, THEN RUN THIS FUNCTION  ⇩⇩⇩
+ *
+ * The editor's Run button cannot pass arguments — it only runs functions that
+ * take none. So the values live here instead.
+ *
+ * Select "setupFirstAdmin" in the function dropdown at the top of the editor,
+ * press Run, and watch the log (Ctrl+Enter). A link to set your password
+ * arrives by email; it is also printed in the log in case the mail is slow or
+ * lands in spam.
+ *
+ * Safe to run more than once: an existing account with that address is
+ * promoted and re-enabled rather than duplicated.
+ */
+function setupFirstAdmin() {
+  const EMAIL = 'promeni.me@primer.rs';   // ← your email address
+  const NAME  = 'Ime Prezime';            // ← your name
+
+  if (EMAIL === 'promeni.me@primer.rs') {
+    Logger.log('Edit EMAIL and NAME at the top of setupFirstAdmin() first.');
+    return;
+  }
+  bootstrapFirstAdmin(EMAIL, NAME);
+}
+
+/**
  * Create the very first administrator, or repair access when nobody can get in.
+ *
+ * Takes arguments, so it is callable from other code and from the editor's
+ * console. From the Run button, use setupFirstAdmin() above instead.
  *
  * This stays in the editor permanently, not just for initial setup. Everything
  * else about accounts moves into the app, which leaves one gap: if the last
@@ -394,28 +422,43 @@ function bootstrapFirstAdmin(email, name) {
 function benchmarkPbkdf2() {
   const password = 'benchmark-passphrase-of-realistic-length';
   const salt = Utils.secureRandomBytes(16);
-  const budgetMs = 1000;
+
+  // A sign-in happens once per session — twelve hours, or sixty days on a
+  // remembered device. Several seconds of it is not a cost anyone notices, and
+  // here every millisecond spent is one the work factor gets.
+  const budgetMs = 2500;
 
   Logger.log('Measuring PBKDF2-HMAC-SHA256 …');
 
-  let recommendation = 0;
-  [1000, 5000, 20000].forEach(function (iterations) {
+  let slowestPerIteration = 0;
+  [200, 500, 1000].forEach(function (iterations) {
     const started = Date.now();
     PasswordService._pbkdf2Sha256(password, salt, iterations);
     const elapsed = Date.now() - started;
     const perIteration = elapsed / iterations;
     Logger.log(`  ${iterations} iterations → ${elapsed} ms (${perIteration.toFixed(4)} ms each)`);
-    if (!recommendation && perIteration > 0) {
-      recommendation = Math.floor(budgetMs / perIteration / 100) * 100;
-    }
+    if (perIteration > slowestPerIteration) slowestPerIteration = perIteration;
   });
+
+  const recommendation = slowestPerIteration > 0
+    ? Math.max(100, Math.floor(budgetMs / slowestPerIteration / 100) * 100)
+    : 0;
 
   Logger.log('');
   Logger.log(`Recommended pbkdf2Iterations: ${recommendation}`);
-  Logger.log('That is the largest value keeping a sign-in near one second.');
+  Logger.log(`Keeps a sign-in near ${(budgetMs / 1000).toFixed(1)} s, using the slowest sample.`);
   Logger.log('Put it in the Config sheet under key: pbkdf2Iterations');
   Logger.log('');
-  Logger.log('Worth remembering: even at this setting the work factor stays far');
-  Logger.log('below bcrypt or Argon2. Password length is what carries this scheme —');
-  Logger.log('do not lower passwordMinLength below 12.');
+  Logger.log('Read the number honestly. Almost all of that time is the cost of');
+  Logger.log('crossing from JavaScript into the platform, which an attacker running');
+  Logger.log('native code does not pay — so each iteration buys far less than the');
+  Logger.log('milliseconds suggest. A few thousand iterations here is nowhere near');
+  Logger.log('what bcrypt or Argon2 would give on an ordinary server.');
+  Logger.log('');
+  Logger.log('What that means in practice:');
+  Logger.log('  · password LENGTH is what actually protects these accounts —');
+  Logger.log('    keep passwordMinLength at 16, so people write a phrase, not a word');
+  Logger.log('  · account lockout is part of the defence, not a nicety');
+  Logger.log('  · the workbook holds the hashes — do not share it more widely');
+  Logger.log('    than it needs to be shared');
 }

@@ -7,13 +7,18 @@
  * checked at billions of guesses per second on commodity hardware, so PBKDF2
  * is built here on top of computeHmacSha256Signature.
  *
- * The honest limit: every iteration crosses the JavaScript/native boundary,
- * which caps the achievable work factor far below what bcrypt or Argon2 reach.
- * This is roughly a thousand times more expensive than one SHA-256 pass, and
- * that is a real improvement, but it is not equivalent protection. The security
- * of this scheme rests on password *length* — hence the 12 character minimum
- * in validatePolicy, and the account lockout in AccountService. Both are load
- * bearing, not decoration.
+ * The honest limit, now measured rather than estimated: one iteration costs
+ * about 2.5 ms on this platform, and almost all of that is the cost of crossing
+ * from JavaScript into the host — a cost an attacker running native code does
+ * not pay. So a couple of seconds of our time buys a couple of thousand
+ * iterations, while buying the attacker very little. The reachable work factor
+ * is nowhere near bcrypt or Argon2, and no amount of tuning here will change
+ * that.
+ *
+ * What follows from it: the security of this scheme rests on password *length*,
+ * not on this function. Hence the 16 character minimum in validatePolicy, which
+ * is long enough that people write a phrase rather than a word, and the account
+ * lockout in AccountService. Both are load bearing, not decoration.
  *
  * Stored format, one self-describing field:
  *
@@ -30,17 +35,23 @@ const PasswordService = (function () {
   const MAX_LENGTH = 200;
 
   /**
-   * Rejected outright regardless of length. A starter list of shapes people
-   * actually pick; extend it as you see what turns up in your own deployment.
+   * Bases people reach for, checked after padding is stripped.
+   *
+   * A plain list of common passwords would be dead weight here: every entry on
+   * such a list is shorter than the 16 character minimum, so length alone
+   * already rejects them. What a length rule does NOT catch is the way people
+   * satisfy it — by padding something short. 'password' becomes
+   * 'password12345678', 'lozinka' becomes 'lozinkalozinka12'. Those clear the
+   * length check while carrying almost no more entropy than the word they grew
+   * from, so the base is what gets matched.
    */
-  const COMMON_PASSWORDS = [
-    'password', 'password1', 'password12', 'password123', 'password1234',
-    'passwort', 'passwort123', 'lozinka', 'lozinka123', 'sifra123',
-    '123456789012', '1234567890', '123456789', '111111111111', '000000000000',
-    'qwertyuiop', 'qwertzuiop', 'qwerty123456', 'asdfghjkl', 'zxcvbnm',
-    'iloveyou123', 'letmein12345', 'welcome12345', 'admin1234567',
-    'administrator', 'handover123', 'handoverapp', 'inspection123',
-    'abcdefghijkl', 'aaaaaaaaaaaa', 'mojalozinka', 'dobrodosli123',
+  const COMMON_BASES = [
+    'password', 'passwort', 'lozinka', 'sifra', 'parola',
+    'qwerty', 'qwertyuiop', 'qwertzuiop', 'asdfghjkl', 'zxcvbnm',
+    'iloveyou', 'letmein', 'welcome', 'dobrodosli', 'zdravo',
+    'admin', 'administrator', 'root', 'test', 'demo',
+    'handover', 'handoverapp', 'inspection', 'inspekcija', 'primopredaja',
+    'abcdefgh', 'abcdefghijkl', 'mojalozinka', 'novalozinka',
   ];
 
   // --- Key derivation ---
@@ -130,8 +141,9 @@ const PasswordService = (function () {
     if (password.length < minLength) {
       throw new HandoverError(
         'VALIDATION_FAILED',
-        `Password must be at least ${minLength} characters. A phrase of four ` +
-        'unrelated words is both easier to remember and far harder to guess.'
+        `Password must be at least ${minLength} characters. Use a phrase of ` +
+        'four unrelated words — easier to remember than a short password, and ' +
+        'far harder to guess.'
       );
     }
     if (password.length > MAX_LENGTH) {
@@ -139,15 +151,42 @@ const PasswordService = (function () {
         'VALIDATION_FAILED', `Password must be at most ${MAX_LENGTH} characters.`);
     }
 
-    const normalized = password.toLowerCase().replace(/\s+/g, '');
-    if (COMMON_PASSWORDS.indexOf(normalized) >= 0) {
+    if (_isPadding(password)) {
       throw new HandoverError(
-        'VALIDATION_FAILED', 'That password is too common. Please choose another.');
+        'VALIDATION_FAILED',
+        'That is a common password with padding added. Length alone does not ' +
+        'make it hard to guess — use four unrelated words instead.'
+      );
     }
     if (/^(.)\1+$/.test(password)) {
       throw new HandoverError(
         'VALIDATION_FAILED', 'A password cannot be a single repeated character.');
     }
+  }
+
+  /**
+   * True when the password is a common base dressed up to clear the length
+   * rule — repeated, or with digits and symbols hung off either end.
+   */
+  function _isPadding(password) {
+    const normalized = password.toLowerCase().replace(/[^a-z0-9šđčćž]/g, '');
+    const letters = normalized.replace(/^[0-9]+|[0-9]+$/g, '');
+
+    if (COMMON_BASES.indexOf(normalized) >= 0) return true;
+    if (COMMON_BASES.indexOf(letters) >= 0) return true;
+
+    const unit = _repeatedUnit(letters);
+    return !!unit && COMMON_BASES.indexOf(unit) >= 0;
+  }
+
+  /** The shortest string that, repeated, makes up the whole input. */
+  function _repeatedUnit(value) {
+    for (let size = 1; size <= value.length / 2; size++) {
+      if (value.length % size !== 0) continue;
+      const candidate = value.substring(0, size);
+      if (candidate.repeat(value.length / size) === value) return candidate;
+    }
+    return '';
   }
 
   return {
