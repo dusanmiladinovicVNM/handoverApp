@@ -55,20 +55,51 @@ function doPost(e) {
     // Auth runs on every single request and reads two rows behind a cache, so
     // it is worth knowing separately from whatever the action itself does —
     // otherwise the obvious suspect and the real one look identical from here.
-    // Visible under Executions in the editor.
     const totalMs = Date.now() - startedAt;
-    Utils.log('INFO', 'API call', {
+    const timing = {
       action: action,
       actor: authCtx ? authCtx.actorString : 'anonymous',
       authMs: authMs,
       handlerMs: totalMs - authMs,
       totalMs: totalMs,
-    });
+    };
+    Utils.log('INFO', 'API call', timing);
+    _recordIfSlow(timing);
 
     return ResponseService.success(result);
 
   } catch (e) {
     return ResponseService.fromException(e);
+  }
+}
+
+/**
+ * Write a slow request's breakdown into AuditLog.
+ *
+ * The Executions panel already carries these numbers, but its rows do not
+ * reliably expand for Web App calls — which makes the one place the timings
+ * exist the one place they cannot be read. Putting the outliers in the sheet
+ * means they can be looked at like any other data, by whoever is actually
+ * wondering why something felt slow.
+ *
+ * Only requests over the threshold are recorded. They are rare by definition,
+ * so the extra write costs nothing in aggregate; logging every call would add a
+ * write to all of them in order to study a handful.
+ */
+function _recordIfSlow(timing) {
+  try {
+    const threshold = Config.getSlowRequestMs();
+    if (threshold > 0 && timing.totalMs < threshold) return;
+    AuditService.logAuth(timing.actor, 'slow_request', {
+      action: timing.action,
+      authMs: timing.authMs,
+      handlerMs: timing.handlerMs,
+      totalMs: timing.totalMs,
+    });
+  } catch (e) {
+    // Diagnostics must never be able to fail a request that has already
+    // succeeded. The response is built and waiting by the time this runs.
+    Utils.log('WARN', 'Slow-request log failed', { error: e.message });
   }
 }
 
