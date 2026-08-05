@@ -13,6 +13,7 @@ const suites = [
   ['File loading and routing', require('./load-order.test')],
   ['Service worker cache', require('./shell-cache.test')],
   ['Sheet reads and cache', require('./sheet-cache.test')],
+  ['Schema cache', require('./schema-cache.test')],
   ['Passwords', require('./password.test')],
   ['Tokens and authorization', require('./auth.test')],
   ['Auth mirror', require('./auth-mirror.test')],

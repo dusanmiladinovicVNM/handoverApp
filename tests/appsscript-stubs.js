@@ -82,6 +82,14 @@ function buildSheetService(db) {
       return hit.map(d => d.deviceId);
     },
 
+    // Counted, because the whole point of the schema cache is that a second
+    // call does not come back here.
+    getSchema: (id) => {
+      db.schemaReads++;
+      return db.schemas.find(s => s.schemaId === id) || null;
+    },
+    getActiveSchemas: () => db.schemas.filter(s => s.active !== false),
+
     getInspection: (id) => db.inspections.find(i => i.inspectionId === id) || null,
     createInspection: (inspection) => { db.inspections.push(inspection); },
     updateInspection: (id, patch) => {
@@ -121,7 +129,10 @@ function buildCacheService(enabled) {
 function createEnvironment(overrides, options) {
   options = options || {};
 
-  const db = { users: [], devices: [], inspections: [], auditLog: [] };
+  const db = {
+    users: [], devices: [], inspections: [], auditLog: [],
+    schemas: [], schemaReads: 0,
+  };
   const mail = { sent: [], failNext: false };
   const properties = {};
 
@@ -196,7 +207,7 @@ function createEnvironment(overrides, options) {
   const sources = [
     'Utils.gs', 'PasswordService.gs', 'AuthMirror.gs', 'UserService.gs',
     'DeviceService.gs', 'MailService.gs', 'AuditService.gs', 'AuthService.gs',
-    'AccountService.gs', 'UserAdminService.gs',
+    'AccountService.gs', 'UserAdminService.gs', 'SchemaService.gs',
   ];
   const code = sources
     .map(f => fs.readFileSync(path.join(GAS_DIR, f), 'utf8'))
@@ -205,7 +216,7 @@ function createEnvironment(overrides, options) {
     // out explicitly rather than read off the context.
     + '\nglobalThis.__exports = { Utils, PasswordService, AuthMirror, UserService, ' +
       'DeviceService, MailService, AuditService, AuthService, AccountService, ' +
-      'UserAdminService, HandoverError };';
+      'UserAdminService, SchemaService, HandoverError };';
 
   vm.runInContext(code, ctx);
 

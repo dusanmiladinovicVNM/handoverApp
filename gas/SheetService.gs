@@ -64,11 +64,29 @@ const SheetService = (function () {
 
   let _ssCache = null;
 
+  /**
+   * What this execution spent talking to Sheets.
+   *
+   * The split in Code.gs can say a handler took four seconds but not where they
+   * went, and the answer is almost always here: opening the workbook is one
+   * fixed cost, and every getValues() after it is another round trip. Only the
+   * two bulk read paths are counted — the direct-cell reads sit on write paths,
+   * which is not where anyone is waiting.
+   */
+  const _stats = { opened: false, openMs: 0, reads: 0, readMs: 0 };
+
   function _ss() {
     if (!_ssCache) {
+      const startedAt = Date.now();
       _ssCache = SpreadsheetApp.openById(Config.getWorkbookId());
+      _stats.opened = true;
+      _stats.openMs = Date.now() - startedAt;
     }
     return _ssCache;
+  }
+
+  function getStats() {
+    return { openMs: _stats.openMs, reads: _stats.reads, readMs: _stats.readMs };
   }
 
   function _sheet(name) {
@@ -121,29 +139,59 @@ const SheetService = (function () {
   function _getAllRows(sheetName) {
     if (_rowCache[sheetName]) return _rowCache[sheetName];
 
+    const startedAt = Date.now();
     const sheet = _sheet(sheetName);
     const lastRow = sheet.getLastRow();
     const rows = lastRow <= 1
       ? []
       : sheet.getRange(2, 1, lastRow - 1, COLUMNS[sheetName].length).getValues();
+    _countRead(startedAt);
 
     _rowCache[sheetName] = rows;
     return rows;
   }
 
   /**
+   * Time inside _ss() is the workbook open, counted separately; charging it to
+   * the read that happened to trigger it would hide it.
+   */
+  function _countRead(startedAt) {
+    _stats.reads += 1;
+    _stats.readMs += Date.now() - startedAt - (_stats.opened ? _stats.openMs : 0);
+    _stats.opened = false;
+  }
+
+  /**
+   * Sheets with a column large enough that reading every row to find one is a
+   * bad trade. Schemas holds a whole form definition per row.
+   */
+  const HEAVY_SHEETS = { Schemas: true };
+
+  /**
    * Find row by primary key column. Returns { rowIndex (1-based, including header), data } or null.
    *
-   * Reads the whole sheet rather than a key column followed by the matching
-   * row. That is one round trip instead of two, and the rows are then shared
-   * with every other lookup in the same request.
+   * For ordinary sheets this reads all rows: one round trip instead of the two
+   * it used to take, and the rows are then shared with every other lookup in
+   * the same request.
+   *
+   * For a heavy sheet it reads the key column and then the single matching row,
+   * which is two round trips but moves a fraction of the bytes. Reading every
+   * row of Schemas pulls every form definition in the workbook in order to use
+   * one of them — and getInspection does exactly that lookup on every open.
    */
   function _findRowByKey(sheetName, keyColumn, keyValue) {
     const colIndex = COLUMNS[sheetName].indexOf(keyColumn);
     if (colIndex < 0) throw new Error(`Column ${keyColumn} not in ${sheetName}`);
 
-    const rows = _getAllRows(sheetName);
     const needle = String(keyValue);
+
+    // A heavy sheet already in the cache costs nothing to scan; only go the
+    // narrow route when the rows would otherwise have to be fetched.
+    if (HEAVY_SHEETS[sheetName] && !_rowCache[sheetName]) {
+      return _findRowNarrow(sheetName, colIndex, needle);
+    }
+
+    const rows = _getAllRows(sheetName);
     for (let i = 0; i < rows.length; i++) {
       if (String(rows[i][colIndex]) === needle) {
         return {
@@ -152,6 +200,28 @@ const SheetService = (function () {
         };
       }
     }
+    return null;
+  }
+
+  function _findRowNarrow(sheetName, colIndex, needle) {
+    const startedAt = Date.now();
+    const sheet = _sheet(sheetName);
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) {
+      _countRead(startedAt);
+      return null;
+    }
+
+    const keys = sheet.getRange(2, colIndex + 1, lastRow - 1, 1).getValues();
+    for (let i = 0; i < keys.length; i++) {
+      if (String(keys[i][0]) !== needle) continue;
+      const rowIndex = i + 2;
+      const row = sheet.getRange(rowIndex, 1, 1, COLUMNS[sheetName].length).getValues()[0];
+      _countRead(startedAt);
+      _stats.reads += 1; // the key column and the row are two round trips
+      return { rowIndex: rowIndex, data: _rowToObject(sheetName, row) };
+    }
+    _countRead(startedAt);
     return null;
   }
 
@@ -408,6 +478,10 @@ const SheetService = (function () {
     } else {
       _appendRow('Schemas', schema);
     }
+    // The copy SchemaService keeps would otherwise outlive this write by up to
+    // six hours. Resolved here rather than at load time, like every other
+    // cross-service reference.
+    SchemaService.invalidate(schema.schemaId);
   }
 
   // ============================================================
@@ -590,5 +664,6 @@ const SheetService = (function () {
     getConfigRows,
     // Diagnostics
     highestIdSuffix,
+    getStats,
   };
 })();
