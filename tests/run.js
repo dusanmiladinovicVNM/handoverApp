@@ -11,6 +11,7 @@ const { summary } = require('./appsscript-stubs');
 
 const suites = [
   ['File loading and routing', require('./load-order.test')],
+  ['Service worker cache', require('./shell-cache.test')],
   ['Passwords', require('./password.test')],
   ['Tokens and authorization', require('./auth.test')],
   ['Sign-in flows', require('./account.test')],
