@@ -76,3 +76,14 @@ web app keeps serving the previous code, however current the editor looks.
 
 Run `verifyDeployment()` afterwards, every time. It is the only thing that
 catches a service that was silently overwritten, and it takes a few seconds.
+
+## No .claspignore
+
+There was one, briefly, and it broke the first push: it excluded everything and
+then failed to re-admit the `.gs` files, so `clasp status` reported the whole of
+`gas/` as untracked and there was nothing to send.
+
+It is not needed. clasp only pushes `.gs`, `.js`, `.html` and `appsscript.json`,
+so `gas/README.md` — this file — stays out on its own. If a `.json` that does
+not belong ever lands in `gas/`, that is the moment to reach for an ignore file,
+and to check `clasp status` before trusting it.
