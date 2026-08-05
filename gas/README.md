@@ -36,6 +36,12 @@ either. That is exactly what makes the next paste land somewhere unexpected.
 
 ## First-time setup
 
+Turn on the Apps Script API for your Google account, once, at
+<https://script.google.com/home/usersettings>. Without it `clasp push` stops
+with *User has not enabled the Apps Script API* — the credentials are fine, the
+account simply does not allow this kind of access yet. Allow a minute for it to
+take effect.
+
 `clasp login` opens a browser once. Then create `.clasp.json` in the repository
 root:
 
