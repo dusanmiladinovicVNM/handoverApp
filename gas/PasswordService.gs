@@ -60,7 +60,30 @@ const PasswordService = (function () {
    * PBKDF2-HMAC-SHA256 with dkLen = 32, i.e. exactly one output block, so the
    * INT(i) suffix appended to the salt is always 1.
    */
+  /**
+   * How much of this execution went into key derivation.
+   *
+   * Deriving a key is meant to be slow — that is the entire defence — so this
+   * is not a cost to be cut. It is a cost to be told apart from the others,
+   * because a login that takes five seconds means one thing if PBKDF2 spent
+   * four of them and something else entirely if it spent two hundred
+   * milliseconds.
+   */
+  const _stats = { derivations: 0, ms: 0 };
+
+  function getStats() {
+    return { pbkdf2: _stats.derivations, pbkdf2Ms: _stats.ms };
+  }
+
   function _pbkdf2Sha256(password, saltBytes, iterations) {
+    const startedAt = Date.now();
+    const out = _derive(password, saltBytes, iterations);
+    _stats.derivations += 1;
+    _stats.ms += Date.now() - startedAt;
+    return out;
+  }
+
+  function _derive(password, saltBytes, iterations) {
     const keyBytes = Utilities.newBlob(password).getBytes();
     const block = Utils.toByteArray(saltBytes).concat([0, 0, 0, 1]);
 
@@ -194,6 +217,7 @@ const PasswordService = (function () {
     verifyPassword,
     hasPassword,
     validatePolicy,
+    getStats,
     // Exposed for benchmarkPbkdf2() in BootstrapService.
     _pbkdf2Sha256,
   };

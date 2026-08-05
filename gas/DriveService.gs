@@ -5,47 +5,143 @@
 
 const DriveService = (function () {
 
+  /**
+   * What this execution spent talking to Drive.
+   *
+   * Drive is the other remote service on the request path, and until this was
+   * counted a handler's unexplained seconds could have been either. Creating an
+   * inspection turned out to be seven round trips here against three to Sheets.
+   */
+  const _stats = { calls: 0, ms: 0 };
+
+  function getStats() {
+    return { drive: _stats.calls, driveMs: _stats.ms };
+  }
+
+  function _drive(fn) {
+    const startedAt = Date.now();
+    try {
+      return fn();
+    } finally {
+      _stats.calls += 1;
+      _stats.ms += Date.now() - startedAt;
+    }
+  }
+
   function _root() {
-    return DriveApp.getFolderById(Config.getInspectionsRootFolderId());
+    return _drive(() => DriveApp.getFolderById(Config.getInspectionsRootFolderId()));
+  }
+
+  function _folderById(id) {
+    return _drive(() => DriveApp.getFolderById(id));
   }
 
   function _getOrCreateChildFolder(parent, name) {
-    const it = parent.getFoldersByName(name);
-    if (it.hasNext()) return it.next();
-    return parent.createFolder(name);
+    return _drive(() => {
+      const it = parent.getFoldersByName(name);
+      if (it.hasNext()) return it.next();
+      return parent.createFolder(name);
+    });
   }
 
   /**
-   * Creates the per-inspection folder structure and returns its ID.
-   *   /Inspections/YYYY/INS-YYYY-NNNNNN/photos
-   *                                   /signatures
-   *                                   /output
-   *                                   /_deleted
+   * The two folders every inspection hangs under: /Inspections and the year
+   * inside it. They are the same for every request and change never, so their
+   * ids are remembered rather than rediscovered — three Drive round trips
+   * (root, Inspections, year) that used to run on every upload, every
+   * finalisation and every create.
+   *
+   * Remembered in Script Properties rather than CacheService because losing it
+   * costs those three round trips again, and because there is one entry per
+   * year for the life of the installation.
+   */
+  function _yearFolder(year) {
+    const key = `driveYear:${year}`;
+    const props = PropertiesService.getScriptProperties();
+
+    const stored = props.getProperty(key);
+    if (stored) {
+      try {
+        return _folderById(stored);
+      } catch (e) {
+        // Folder moved to the bin or the id is from another installation. Fall
+        // through and find it again rather than failing the upload.
+        Utils.log('WARN', 'Remembered year folder is gone, rediscovering', {
+          year: year, error: e.message,
+        });
+      }
+    }
+
+    const folder = _getOrCreateChildFolder(
+      _getOrCreateChildFolder(_root(), 'Inspections'), year);
+    try {
+      props.setProperty(key, folder.getId());
+    } catch (e) {}
+    return folder;
+  }
+
+  /**
+   * Creates the per-inspection folder and returns its ID.
+   *   /Inspections/YYYY/INS-YYYY-NNNNNN
+   *
+   * The photos, signatures, output and _deleted subfolders are *not* made here.
+   * getSubfolder creates whichever one is asked for, so making all four up
+   * front was four Drive round trips on every create for folders that an
+   * inspection with no photos and no PDF never uses.
    */
   function createInspectionFolders(inspectionId) {
-    const root = _root();
-    const inspectionsFolder = _getOrCreateChildFolder(root, 'Inspections');
     const year = inspectionId.split('-')[1];
-    const yearFolder = _getOrCreateChildFolder(inspectionsFolder, year);
-    const inspectionFolder = _getOrCreateChildFolder(yearFolder, inspectionId);
-    _getOrCreateChildFolder(inspectionFolder, 'photos');
-    _getOrCreateChildFolder(inspectionFolder, 'signatures');
-    _getOrCreateChildFolder(inspectionFolder, 'output');
-    _getOrCreateChildFolder(inspectionFolder, '_deleted');
-    return inspectionFolder.getId();
+    return _getOrCreateChildFolder(_yearFolder(year), inspectionId).getId();
   }
 
+  /**
+   * The inspection's own folder.
+   *
+   * The id is on the inspection row, so this is one lookup. Walking down from
+   * the root to rediscover it was four Drive round trips to learn something the
+   * sheet already knew — and getSubfolder does it on every photo upload.
+   */
   function getInspectionFolder(inspectionId) {
-    const root = _root();
-    const inspectionsFolder = _getOrCreateChildFolder(root, 'Inspections');
+    const inspection = SheetService.getInspection(inspectionId);
+    if (inspection && inspection.driveFolderId) {
+      try {
+        return _folderById(inspection.driveFolderId);
+      } catch (e) {
+        Utils.log('WARN', 'Stored driveFolderId is unusable, walking the tree', {
+          inspectionId: inspectionId, error: e.message,
+        });
+      }
+    }
+    // No stored id, or it no longer resolves. Rows created before the column
+    // existed land here.
     const year = inspectionId.split('-')[1];
-    const yearFolder = _getOrCreateChildFolder(inspectionsFolder, year);
-    return _getOrCreateChildFolder(yearFolder, inspectionId);
+    return _getOrCreateChildFolder(_yearFolder(year), inspectionId);
   }
+
+  /**
+   * Within one execution the same subfolder is often asked for twice —
+   * moveToDeleted wants _deleted and photos, and each ask used to re-resolve
+   * the inspection folder underneath it.
+   */
+  const _subfolderCache = {};
 
   function getSubfolder(inspectionId, subfolderName) {
-    const folder = getInspectionFolder(inspectionId);
-    return _getOrCreateChildFolder(folder, subfolderName);
+    const key = `${inspectionId}/${subfolderName}`;
+    if (_subfolderCache[key]) return _subfolderCache[key];
+
+    const folder = _getOrCreateChildFolder(
+      _inspectionFolderOnce(inspectionId), subfolderName);
+    _subfolderCache[key] = folder;
+    return folder;
+  }
+
+  const _inspectionFolders = {};
+
+  function _inspectionFolderOnce(inspectionId) {
+    if (!_inspectionFolders[inspectionId]) {
+      _inspectionFolders[inspectionId] = getInspectionFolder(inspectionId);
+    }
+    return _inspectionFolders[inspectionId];
   }
 
   /**
@@ -137,5 +233,6 @@ const DriveService = (function () {
     saveJsonFile,
     getFileBlob,
     getThumbnailUrl,
+    getStats,
   };
 })();

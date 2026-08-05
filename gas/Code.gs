@@ -93,16 +93,20 @@ function _recordIfSlow(timing) {
     // Where the handler's time actually went. Without this the row says four
     // seconds and leaves the reader to guess between opening the workbook, the
     // round trips after it, and the handler's own work.
-    const sheets = SheetService.getStats();
-    AuditService.logAuth(timing.actor, 'slow_request', {
+    const detail = {
       action: timing.action,
       authMs: timing.authMs,
       handlerMs: timing.handlerMs,
       totalMs: timing.totalMs,
-      openMs: sheets.openMs,
-      reads: sheets.reads,
-      readMs: sheets.readMs,
-    });
+    };
+    // Three remote services and one deliberately expensive computation. Between
+    // them they account for nearly all of any slow request, and each has to be
+    // named separately or the row says "four seconds" and stops there.
+    Object.assign(detail, SheetService.getStats());
+    Object.assign(detail, DriveService.getStats());
+    Object.assign(detail, PasswordService.getStats());
+
+    AuditService.logAuth(timing.actor, 'slow_request', detail);
   } catch (e) {
     // Diagnostics must never be able to fail a request that has already
     // succeeded. The response is built and waiting by the time this runs.

@@ -68,12 +68,15 @@ const SheetService = (function () {
    * What this execution spent talking to Sheets.
    *
    * The split in Code.gs can say a handler took four seconds but not where they
-   * went, and the answer is almost always here: opening the workbook is one
-   * fixed cost, and every getValues() after it is another round trip. Only the
-   * two bulk read paths are counted — the direct-cell reads sit on write paths,
-   * which is not where anyone is waiting.
+   * went. Opening the workbook is one fixed cost; every getValues() after it is
+   * a round trip, and so is every write.
+   *
+   * Writes were left out of the first version of this on the grounds that
+   * nobody waits on them. That was wrong: an appendRow costs the same round
+   * trip as a read, and a handler like createInspection does three of them
+   * while the person sits looking at a spinner.
    */
-  const _stats = { opened: false, openMs: 0, reads: 0, readMs: 0 };
+  const _stats = { opened: false, openMs: 0, reads: 0, readMs: 0, writes: 0, writeMs: 0 };
 
   function _ss() {
     if (!_ssCache) {
@@ -86,7 +89,22 @@ const SheetService = (function () {
   }
 
   function getStats() {
-    return { openMs: _stats.openMs, reads: _stats.reads, readMs: _stats.readMs };
+    return {
+      openMs: _stats.openMs,
+      reads: _stats.reads, readMs: _stats.readMs,
+      writes: _stats.writes, writeMs: _stats.writeMs,
+    };
+  }
+
+  /** Wrap a write so it shows up in the slow-request breakdown. */
+  function _write(fn) {
+    const startedAt = Date.now();
+    try {
+      return fn();
+    } finally {
+      _stats.writes += 1;
+      _stats.writeMs += Date.now() - startedAt;
+    }
   }
 
   function _sheet(name) {
@@ -228,14 +246,14 @@ const SheetService = (function () {
   function _appendRow(sheetName, obj) {
     const sheet = _sheet(sheetName);
     const row = _objectToRow(sheetName, obj);
-    sheet.appendRow(row);
+    _write(() => sheet.appendRow(row));
     _invalidate(sheetName);
   }
 
   function _updateRow(sheetName, rowIndex, obj) {
     const sheet = _sheet(sheetName);
     const row = _objectToRow(sheetName, obj);
-    sheet.getRange(rowIndex, 1, 1, COLUMNS[sheetName].length).setValues([row]);
+    _write(() => sheet.getRange(rowIndex, 1, 1, COLUMNS[sheetName].length).setValues([row]));
     _invalidate(sheetName);
   }
 
@@ -381,7 +399,7 @@ const SheetService = (function () {
           String(data[i][1]) === sectionId &&
           String(data[i][2]) === itemId) {
         const colIndex = COLUMNS.Answers.indexOf('attachmentCount') + 1;
-        sheet.getRange(i + 2, colIndex).setValue(count);
+        _write(() => sheet.getRange(i + 2, colIndex).setValue(count));
         _invalidate('Answers');
         return;
       }
@@ -422,7 +440,7 @@ const SheetService = (function () {
     const invalidated = [];
     for (let i = 0; i < data.length; i++) {
       if (String(data[i][inspectionIdColIdx]) === inspectionId && data[i][validColIdx] === true) {
-        sheet.getRange(i + 2, validColIdx + 1).setValue(false);
+        _write(() => sheet.getRange(i + 2, validColIdx + 1).setValue(false));
         invalidated.push(data[i][COLUMNS.Signatures.indexOf('signatureId')]);
       }
     }
@@ -605,8 +623,8 @@ const SheetService = (function () {
     const revoked = [];
     for (let i = 0; i < data.length; i++) {
       if (String(data[i][userIdIdx]) === userId && !data[i][revokedAtIdx]) {
-        sheet.getRange(i + 2, revokedAtIdx + 1).setValue(now);
-        sheet.getRange(i + 2, revokedByIdx + 1).setValue(revokedBy || 'system');
+        _write(() => sheet.getRange(i + 2, revokedAtIdx + 1).setValue(now));
+        _write(() => sheet.getRange(i + 2, revokedByIdx + 1).setValue(revokedBy || 'system'));
         revoked.push(String(data[i][deviceIdIdx]));
       }
     }
