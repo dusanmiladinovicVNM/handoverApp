@@ -4,6 +4,23 @@
  */
 
 /**
+ * Actions that run before a session exists, and are therefore dispatched with
+ * no auth context at all.
+ *
+ * This is the only exception to "every request is authenticated", so it stays
+ * an explicit allowlist rather than a property of each handler — adding an
+ * action here is a decision someone has to make on purpose. Each of these
+ * handlers is responsible for its own rate limiting and for answering
+ * identically whether or not the account exists.
+ */
+const PUBLIC_ACTIONS = [
+  'login',
+  'requestPasswordReset',
+  'setPassword',
+  'refreshSession',
+];
+
+/**
  * Main API entry point.
  * Frontend calls with Content-Type: text/plain;charset=utf-8 to bypass CORS preflight.
  * Body shape: { action, auth, data }
@@ -26,10 +43,13 @@ function doPost(e) {
       return ResponseService.error('INVALID_REQUEST', 'Missing action field.');
     }
 
-    // Resolve auth before dispatch
-    const authCtx = AuthService.resolveAuth(body.auth);
+    // Resolve auth before dispatch, except for the sign-in actions themselves
+    const isPublic = PUBLIC_ACTIONS.indexOf(action) >= 0;
+    const authCtx = isPublic ? null : AuthService.resolveAuth(body.auth);
 
-    Utils.log('INFO', 'API call', { action, actor: authCtx.actorString });
+    Utils.log('INFO', 'API call', {
+      action, actor: authCtx ? authCtx.actorString : 'anonymous',
+    });
 
     const result = Router.dispatch(action, authCtx, body.data);
     return ResponseService.success(result);

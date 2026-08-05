@@ -65,6 +65,11 @@ const InspectionService = (function () {
       tenantTokenHash: Utils.sha256(tenantToken),
       lockedAt: '',
       signedAt: '',
+      // Who the inspection is *for*, which is not always who typed it in. The
+      // office commonly opens the job and an inspector goes out to do it, so
+      // ownership cannot be inferred from createdBy — see phase 3, where this
+      // column starts governing what an inspector may see.
+      assignedTo: UserService.normalizeEmail(data.assignedTo) || authCtx.email || '',
     };
 
     SheetService.createInspection(inspection);

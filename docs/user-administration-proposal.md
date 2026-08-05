@@ -499,11 +499,31 @@ Opozvati kompromitovani admin token iz `gas/BootstrapService.gs:202`
 (`revokeAdminTokenByNonce('6ff63234c6e4727b')`) i izbaciti ga iz izvornog koda.
 Ovo ne čeka ostatak posla.
 
-**Faza 1 — temelji, bez vidljive promene**
+**Faza 1 — temelji, bez vidljive promene** ✅ *urađeno*
 Listovi `Users` i `Devices`, kolona `assignedTo`, `UserService.gs`,
-`PasswordService.gs`, `DeviceService.gs`, novi tipovi tokena. `resolveAuth`
-prihvata **i** stari admin token **i** novu sesiju. Ništa se ne kvari, niko ništa
-ne primećuje. Ovde se radi i merenje broja iteracija iz sekcije 5.
+`PasswordService.gs`, `DeviceService.gs`, `MailService.gs`, `AccountService.gs`,
+novi tipovi tokena. `resolveAuth` prihvata **i** stari admin token **i** novu
+sesiju. Ništa se ne kvari, niko ništa ne primećuje.
+
+Uz dogovoreni obim faze uključene su i serverske akcije prijave (`login`,
+`setPassword`, `requestPasswordReset`, `refreshSession`, `changePassword`, `me`,
+`signOut`). Bez njih se faza ne bi mogla proveriti do kraja — ovako se ceo tok
+prijave testira pre nego što se napiše i jedan ekran. Akcije za upravljanje
+korisnicima (`listUsers`, `createUser`, `setUserStatus`, `setUserRole` …) ostaju
+za fazu 2, zajedno sa celim frontendom.
+
+Postupak puštanja u rad, redom:
+
+1. `bootstrapSheet()` — pravi listove `Users` i `Devices`, dodaje kolonu
+   `assignedTo` i upisuje nove ključeve u `Config`
+2. `migrateAssignedTo()` — popunjava `assignedTo` na postojećim inspekcijama
+3. `benchmarkPbkdf2()` — meri i predlaže `pbkdf2Iterations`; **izmerenu
+   vrednost upisati u `Config` list**
+4. `bootstrapFirstAdmin('email@firma.rs', 'Ime Prezime')` — prvi nalog
+5. `smokeTest()` — provera da sve stoji
+
+Merenje iz koraka 3 nije formalnost. Podrazumeva se 1000 iteracija, što je
+namerno nisko; prava vrednost se zna tek posle merenja na samom deploymentu.
 
 **Faza 2 — ekran i prelazak ljudi**
 `/admin/users`, novi ekran za prijavu, ekran za postavljanje lozinke. Upisati
@@ -581,6 +601,14 @@ Obrazac preuzet iz Spesenovog `README.md`, gde se pokazao kao koristan.
 
 Scenario 2 zaključava nalog na 15 minuta — raditi ga sa testnim nalogom.
 Scenariji 12–15 pokrivaju najlakše mesto za previd iz sekcije 9.
+
+**Scenariji 1–11 su automatizovani** u `tests/` i pokreću se sa `node tests/run.js`
+— bez zavisnosti i bez test frameworka, nad stvarnim `.gs` fajlovima uz zamenjene
+Apps Script primitive. Tu je i provera koje nema u gornjoj tabeli, a najviše
+vredi: PBKDF2 iz sekcije 5 poredi se sa `crypto.pbkdf2Sync` iz Node-a. Funkcija
+za izvođenje ključa napisana rukom može biti pogrešna a da to ništa ne otkrije —
+pogrešna ali dosledna funkcija i dalje pušta sve da se prijave, dok su sačuvani
+hash-evi znatno slabiji nego što se misli.
 
 ---
 

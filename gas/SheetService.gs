@@ -17,7 +17,10 @@ const SheetService = (function () {
       'notes', 'createdAt', 'updatedAt', 'createdBy',
       'driveFolderId', 'finalPdfFileId',
       'currentNonce', 'tenantTokenHash',
-      'lockedAt', 'signedAt'
+      'lockedAt', 'signedAt',
+      // Appended, never inserted: bootstrapSheet() rewrites the header row in
+      // place, so a column added in the middle would shift every existing row.
+      'assignedTo'
     ],
     Answers: [
       'inspectionId', 'sectionId', 'itemId', 'valueType',
@@ -41,6 +44,19 @@ const SheetService = (function () {
     ],
     Config: [
       'key', 'value', 'description', 'updatedAt'
+    ],
+    Users: [
+      'userId', 'email', 'name', 'role', 'status',
+      'passHash', 'passSetAt',
+      'failedCount', 'lockedUntil',
+      'createdAt', 'createdBy',
+      'disabledAt', 'disabledBy',
+      'lastLoginAt', 'notes'
+    ],
+    Devices: [
+      'deviceId', 'userId', 'label', 'nonce',
+      'createdAt', 'lastSeenAt', 'expiresAt',
+      'revokedAt', 'revokedBy', 'userAgent'
     ],
   };
 
@@ -349,6 +365,90 @@ const SheetService = (function () {
   }
 
   // ============================================================
+  // Users
+  // ============================================================
+
+  function createUser(user) {
+    _appendRow('Users', user);
+  }
+
+  function getUser(userId) {
+    const result = _findRowByKey('Users', 'userId', userId);
+    return result ? result.data : null;
+  }
+
+  /** Email lookup is case-insensitive — the stored value is already lowercased. */
+  function getUserByEmail(email) {
+    const needle = String(email || '').trim().toLowerCase();
+    if (!needle) return null;
+    const all = _getAllRows('Users').map(r => _rowToObject('Users', r));
+    return all.find(u => String(u.email).trim().toLowerCase() === needle) || null;
+  }
+
+  function updateUser(userId, updates) {
+    const result = _findRowByKey('Users', 'userId', userId);
+    if (!result) throw new HandoverError('NOT_FOUND', `User ${userId} not found.`);
+    const merged = Object.assign({}, result.data, updates);
+    _updateRow('Users', result.rowIndex, merged);
+    return merged;
+  }
+
+  function listUsers() {
+    return _getAllRows('Users').map(r => _rowToObject('Users', r));
+  }
+
+  // ============================================================
+  // Devices
+  // ============================================================
+
+  function createDevice(device) {
+    _appendRow('Devices', device);
+  }
+
+  function getDevice(deviceId) {
+    const result = _findRowByKey('Devices', 'deviceId', deviceId);
+    return result ? result.data : null;
+  }
+
+  function updateDevice(deviceId, updates) {
+    const result = _findRowByKey('Devices', 'deviceId', deviceId);
+    if (!result) throw new HandoverError('NOT_FOUND', `Device ${deviceId} not found.`);
+    const merged = Object.assign({}, result.data, updates);
+    _updateRow('Devices', result.rowIndex, merged);
+    return merged;
+  }
+
+  function getDevicesForUser(userId, includeRevoked) {
+    const all = _getAllRows('Devices').map(r => _rowToObject('Devices', r));
+    return all.filter(d => d.userId === userId && (includeRevoked || !d.revokedAt));
+  }
+
+  /**
+   * Revoke every active device of one user in a single pass.
+   * Used on password change and when an account is disabled.
+   */
+  function revokeDevicesForUser(userId, revokedBy) {
+    const sheet = _sheet('Devices');
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return [];
+    const data = sheet.getRange(2, 1, lastRow - 1, COLUMNS.Devices.length).getValues();
+    const userIdIdx = COLUMNS.Devices.indexOf('userId');
+    const revokedAtIdx = COLUMNS.Devices.indexOf('revokedAt');
+    const revokedByIdx = COLUMNS.Devices.indexOf('revokedBy');
+    const deviceIdIdx = COLUMNS.Devices.indexOf('deviceId');
+    const now = Utils.nowIso();
+    const revoked = [];
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][userIdIdx]) === userId && !data[i][revokedAtIdx]) {
+        sheet.getRange(i + 2, revokedAtIdx + 1).setValue(now);
+        sheet.getRange(i + 2, revokedByIdx + 1).setValue(revokedBy || 'system');
+        revoked.push(String(data[i][deviceIdIdx]));
+      }
+    }
+    return revoked;
+  }
+
+  // ============================================================
   // Public API
   // ============================================================
 
@@ -381,5 +481,17 @@ const SheetService = (function () {
     getActiveSchemas,
     getSchema,
     upsertSchema,
+    // Users
+    createUser,
+    getUser,
+    getUserByEmail,
+    updateUser,
+    listUsers,
+    // Devices
+    createDevice,
+    getDevice,
+    updateDevice,
+    getDevicesForUser,
+    revokeDevicesForUser,
   };
 })();

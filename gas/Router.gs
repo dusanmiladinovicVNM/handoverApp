@@ -6,6 +6,16 @@
 const Router = (function () {
 
   const ROUTES = {
+    // --- Accounts and sessions ---
+    // The first four run unauthenticated; see PUBLIC_ACTIONS in Code.gs.
+    'login': AccountService.login,
+    'requestPasswordReset': AccountService.requestPasswordReset,
+    'setPassword': AccountService.setPassword,
+    'refreshSession': AccountService.refreshSession,
+    'changePassword': AccountService.changePassword,
+    'me': AccountService.me,
+    'signOut': AccountService.signOut,
+
     'getSchemas': function (authCtx, data) {
       AuthService.requireAdmin(authCtx);
       return { schemas: SchemaService.listActiveSchemas() };
