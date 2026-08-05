@@ -103,10 +103,21 @@ const DeviceService = (function () {
   }
 
   /**
-   * Record that a device is still in use, at most once an hour.
+   * Record that a device is still in use.
    *
-   * Writing on every request would add a Sheets write to every API call for a
-   * field only ever read by a human looking at the admin screen.
+   * Called when a session is issued or refreshed — never while resolving one.
+   *
+   * It used to run on the request path, throttled to once an hour, on the
+   * reasoning that a write every sixty minutes was cheap. The measurement said
+   * otherwise: the request that happened to carry the write took 9.3 s in auth
+   * against 1.0 s of actual work, and those were the ten-second outliers that
+   * had been appearing all along. A Sheets write costs far more than a read,
+   * and a request that only reads should not be the one paying for it.
+   *
+   * The cost of moving it: lastSeenAt is now accurate to the session lifetime
+   * rather than to the hour. For a column read by a human deciding whether a
+   * device is still in use, "yesterday" versus "yesterday afternoon" changes
+   * nothing.
    */
   function touch(device) {
     if (!device) return;

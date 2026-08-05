@@ -238,7 +238,10 @@ const AuthService = (function () {
       throw new HandoverError('UNAUTHORIZED', 'This account has been disabled.');
     }
 
-    DeviceService.touch(device);
+    // Deliberately no write here. Recording lastSeenAt used to happen on this
+    // path and was what made one request in every few take ten seconds instead
+    // of two — see DeviceService.touch. Resolving a session reads; it does not
+    // write.
 
     return {
       type: 'token',
