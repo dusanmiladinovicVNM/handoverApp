@@ -473,6 +473,33 @@ const SheetService = (function () {
     return _getAllRows('Devices').map(r => _rowToObject('Devices', r));
   }
 
+  // ============================================================
+  // Diagnostics
+  // ============================================================
+
+  /**
+   * Highest NNNNNN in use on a sheet, for IDs shaped PRE-YYYY-NNNNNN.
+   * Rows from other years are ignored — each year counts from one.
+   *
+   * Lives here rather than in BootstrapService so it goes through the same
+   * spreadsheet handle and the same per-execution cache. Opening the workbook
+   * again for each sheet, which is what it did before, is one of the most
+   * expensive calls available.
+   */
+  function highestIdSuffix(sheetName, idColumn, year) {
+    const index = COLUMNS[sheetName].indexOf(idColumn);
+    if (index < 0) throw new Error(`Column ${idColumn} not in ${sheetName}`);
+
+    let highest = 0;
+    _getAllRows(sheetName).forEach(row => {
+      const match = String(row[index]).match(/^[A-Z]+-(\d{4})-(\d+)$/);
+      if (!match || Number(match[1]) !== year) return;
+      const n = Number(match[2]);
+      if (n > highest) highest = n;
+    });
+    return highest;
+  }
+
   /**
    * Revoke every active device of one user in a single pass.
    * Used on password change and when an account is disabled.
@@ -546,5 +573,7 @@ const SheetService = (function () {
     getDevicesForUser,
     listDevices,
     revokeDevicesForUser,
+    // Diagnostics
+    highestIdSuffix,
   };
 })();

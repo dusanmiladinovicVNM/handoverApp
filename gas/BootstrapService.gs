@@ -295,14 +295,25 @@ function verifyDeployment() {
  */
 function smokeTest() {
   const checks = [];
+  const startedAt = Date.now();
 
+  // Each check is timed, because the total on its own says nothing about where
+  // the time went. This run touches Drive, Sheets and the password derivation,
+  // and those differ by orders of magnitude — without the split, a slow run
+  // invites guessing, and guessing about performance has been wrong every time
+  // it has been tried on this project.
   function check(name, fn) {
+    const at = Date.now();
+    let outcome;
     try {
       fn();
-      checks.push(`✓ ${name}`);
+      outcome = `✓ ${name}`;
     } catch (e) {
-      checks.push(`✗ ${name}: ${e.message}`);
+      outcome = `✗ ${name}: ${e.message}`;
     }
+    const ms = Date.now() - at;
+    // Only worth the noise once a check is slow enough to matter.
+    checks.push(ms >= 250 ? `${outcome}   [${(ms / 1000).toFixed(1)}s]` : outcome);
   }
 
   check('Config: WORKBOOK_ID', () => Config.getWorkbookId());
@@ -371,7 +382,7 @@ function smokeTest() {
      ['deviceCounter', 'Devices', 'deviceId'],
      ['inspectionCounter', 'Inspections', 'inspectionId']].forEach(function (entry) {
       const counter = parseInt(props.getProperty(`${entry[0]}_${year}`) || '0', 10);
-      const highest = _highestIdSuffix(entry[1], entry[2], year);
+      const highest = SheetService.highestIdSuffix(entry[1], entry[2], year);
       if (highest > counter) {
         behind.push(`${entry[0]}_${year} is ${counter} but ${entry[1]} already reaches ${highest}`);
       }
@@ -383,6 +394,12 @@ function smokeTest() {
   });
 
   Logger.log(checks.join('\n'));
+  Logger.log('');
+  Logger.log(`Total: ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+  Logger.log('Timings are shown for checks over 250 ms. Three things here are');
+  Logger.log('slow by nature and say nothing about the app: Drive lookups, the');
+  Logger.log(`password roundtrip (three derivations at ${Config.getPbkdf2Iterations()} iterations,`);
+  Logger.log('by design), and the first read of each sheet.');
 
   // Printed rather than asserted: no check here can tell a working address from
   // a plausible one, and this single value builds both the tenant links and the
@@ -427,30 +444,6 @@ function removeLegacyAdminTokens() {
   props.deleteProperty('ADMIN_NONCES');
   Logger.log(`Removed ADMIN_NONCES (${count} entr${count === 1 ? 'y' : 'ies'}).`);
   Logger.log('Tokens of that shape were already being refused by resolveAuth.');
-}
-
-/**
- * Highest NNNNNN currently used on a sheet, for IDs of the form PRE-YYYY-NNNNNN.
- * Rows from other years are ignored — each year counts from one.
- */
-function _highestIdSuffix(sheetName, idColumn, year) {
-  const columns = SheetService.COLUMNS[sheetName];
-  const index = columns.indexOf(idColumn);
-  const sheet = SpreadsheetApp.openById(Config.getWorkbookId()).getSheetByName(sheetName);
-  if (!sheet) return 0;
-
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return 0;
-
-  const values = sheet.getRange(2, index + 1, lastRow - 1, 1).getValues();
-  let highest = 0;
-  for (let i = 0; i < values.length; i++) {
-    const match = String(values[i][0]).match(/^[A-Z]+-(\d{4})-(\d+)$/);
-    if (!match || Number(match[1]) !== year) continue;
-    const n = Number(match[2]);
-    if (n > highest) highest = n;
-  }
-  return highest;
 }
 
 /**
