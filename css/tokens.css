@@ -4,47 +4,76 @@
    ============================================================ */
 
 :root {
-  /* Color palette: documentary, professional, low-contrast for long use. */
-  --color-bg:           #f4f5f7;
+  /* ----------------------------------------------------------------
+     Colour: the CPMH palette.
+
+     Taken from the company site's style.css, and used the way that site
+     uses it — which matters more than the hex values. There, the chrome
+     is near-black, the page is a neutral grey, and the green appears in
+     small doses: a heading on a dark panel, a link on hover, a rule
+     under an active item. It is never a large fill.
+
+     That restraint is not only taste. White on #76C600 is about 2:1,
+     nowhere near readable, so a green button would have to carry dark
+     text and would then shout louder than anything else on a screen
+     someone works in for an hour at a time. Black chrome with a green
+     accent is both what CPMH does and what survives that hour.
+
+     The five values below the rule are CPMH's own. Everything after
+     them is derived, because an inspection app needs states a brochure
+     site does not.
+     ---------------------------------------------------------------- */
+
+  --color-bg:           #f4f4f4;
   --color-surface:      #ffffff;
-  --color-surface-alt:  #fafbfc;
-  --color-border:       #d8dde3;
-  --color-border-strong:#b8c0c9;
+  --color-ink:          #111111;   /* CPMH --black: chrome, buttons */
+  --color-text:         #222222;
+  --color-text-muted:   #555555;
+  --color-border:       #e8e8e8;   /* CPMH --line */
+  --color-accent:       #76C600;   /* CPMH --accent: the brand green */
 
-  --color-text:         #1c2530;
-  --color-text-muted:   #5b6573;
-  --color-text-subtle:  #8590a0;
+  --color-surface-alt:  #fafafa;
+  --color-border-strong:#d4d4d4;
+  --color-text-subtle:  #808080;
 
-  --color-primary:      #1a3a52;   /* deep blue — primary actions, headers */
-  --color-primary-hover:#244c6b;
-  --color-primary-soft: #e6edf3;
+  /* Primary is the black, not the green — see above. */
+  --color-primary:      #111111;
+  --color-primary-hover:#333333;
+  --color-primary-soft: #ededed;
 
-  --color-accent:       #c47d2c;   /* warm amber — highlights, status badges */
+  /* The green darkened until it is readable as text on white (4.7:1).
+     Use --color-accent for rules, rings and fills; this for words. */
+  --color-accent-text:  #4e8300;
+  --color-accent-soft:  #eaf7d6;
 
-  --color-success:      #2d7a4f;
-  --color-success-soft: #e1f0e8;
-  --color-warning:      #b8721e;
-  --color-warning-soft: #fbeed7;
-  --color-danger:       #b53a2c;
-  --color-danger-soft:  #fbe3df;
-  --color-info:         #2c5d8a;
-  --color-info-soft:    #e1ecf6;
+  --color-success:      #3f7a00;   /* the brand green, deepened */
+  --color-success-soft: #eaf7d6;
+  --color-warning:      #9a6400;
+  --color-warning-soft: #f7eed8;
+  --color-danger:       #b3271e;
+  --color-danger-soft:  #f9e2e0;
+  --color-info:         #3a3a3a;   /* graphite: this palette has no blue */
+  --color-info-soft:    #eeeeee;
 
-  /* Status colors (semantic) */
-  --status-draft-bg:           #e6edf3;
-  --status-draft-fg:            #1a3a52;
-  --status-review-bg:          #fbeed7;
-  --status-review-fg:           #8a5114;
-  --status-locked-bg:          #fdebd0;
-  --status-locked-fg:           #8a4f0e;
-  --status-partial-bg:         #e1ecf6;
-  --status-partial-fg:          #1f4866;
-  --status-signed-bg:          #e1f0e8;
-  --status-signed-fg:           #1f5a3a;
-  --status-archived-bg:        #ededee;
-  --status-archived-fg:         #5b6573;
-  --status-cancelled-bg:       #fbe3df;
-  --status-cancelled-fg:        #8a2620;
+  /* Status colours.
+     Read down the list and they run grey → amber → green, which is the
+     order an inspection actually moves in. Six states in a palette with
+     one hue means leaning on that progression rather than on six
+     unrelated colours nobody can keep straight. */
+  --status-draft-bg:           #ededed;
+  --status-draft-fg:            #3a3a3a;
+  --status-review-bg:          #f7eed8;
+  --status-review-fg:           #7d5200;
+  --status-locked-bg:          #f3e3c2;
+  --status-locked-fg:           #6b4400;
+  --status-partial-bg:         #eaf5d8;
+  --status-partial-fg:          #55771d;
+  --status-signed-bg:          #d9efb9;
+  --status-signed-fg:           #3a6b00;
+  --status-archived-bg:        #e6e6e6;
+  --status-archived-fg:         #555555;
+  --status-cancelled-bg:       #f9e2e0;
+  --status-cancelled-fg:        #9a231b;
 
   /* Spacing (rem-based, base 16px) */
   --space-1: 0.25rem;  /* 4 */
@@ -57,9 +86,13 @@
   --space-10: 2.5rem;  /* 40 */
   --space-12: 3rem;    /* 48 */
 
-  /* Typography */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-               'Helvetica Neue', Arial, sans-serif;
+  /* Typography.
+     PT Sans is CPMH's face. Arial sits directly behind it because that
+     is CPMH's own fallback, and because this app is used in empty flats
+     where a webfont may not arrive — the system stack after it keeps
+     that from looking like a different product. */
+  --font-sans: 'PT Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+               Roboto, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   --text-xs:   0.75rem;
@@ -89,9 +122,14 @@
   --border-medium: 1px solid var(--color-border-strong);
 
   /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(28, 37, 48, 0.06);
-  --shadow-md: 0 2px 8px rgba(28, 37, 48, 0.08), 0 1px 2px rgba(28, 37, 48, 0.04);
-  --shadow-lg: 0 8px 24px rgba(28, 37, 48, 0.12), 0 2px 4px rgba(28, 37, 48, 0.06);
+  --shadow-sm: 0 1px 2px rgba(17, 17, 17, 0.06);
+  --shadow-md: 0 2px 8px rgba(17, 17, 17, 0.08), 0 1px 2px rgba(17, 17, 17, 0.04);
+  --shadow-lg: 0 8px 24px rgba(17, 17, 17, 0.12), 0 2px 4px rgba(17, 17, 17, 0.06);
+
+  /* The focus ring is the green, and it is the one place it appears on
+     every screen. Keyboard focus is exactly the "small dose, high
+     salience" job the accent is for. */
+  --focus-ring: 0 0 0 3px rgba(118, 198, 0, 0.35);
 
   /* Layout */
   --header-height: 3.5rem;

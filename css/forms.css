@@ -59,8 +59,8 @@
 .form-textarea:focus,
 .form-select:focus {
   outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(26, 58, 82, 0.15);
+  border-color: var(--color-ink);
+  box-shadow: var(--focus-ring);
 }
 
 .form-input:disabled,
@@ -80,7 +80,7 @@
 .form-input--error:focus,
 .form-textarea--error:focus,
 .form-select--error:focus {
-  box-shadow: 0 0 0 3px rgba(181, 58, 44, 0.15);
+  box-shadow: 0 0 0 3px rgba(179, 39, 30, 0.18);
 }
 
 .form-textarea {
