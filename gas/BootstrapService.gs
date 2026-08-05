@@ -701,8 +701,12 @@ function benchmarkPbkdf2() {
   Logger.log('');
   Logger.log('But do raise the setting to what this prints. Leaving it below the');
   Logger.log('measurement costs nothing in comfort and hands the attacker a');
-  Logger.log('proportional discount — at 1000 where 4000 fits, three quarters of');
-  Logger.log('the protection that was available is simply not being used.');
+  Logger.log('proportional discount, in direct proportion:');
+  Logger.log(`  currently set: ${Config.getPbkdf2Iterations()}`);
+  Logger.log(`  fits the same budget: ${recommendation}`);
+  Logger.log('A sign-in happens once every twelve hours, or once every sixty days');
+  Logger.log('on a remembered device — so the extra second is not a cost anyone');
+  Logger.log('meets often, while the discount applies to every stolen hash.');
   Logger.log('');
   Logger.log('What that means in practice:');
   Logger.log('  · password LENGTH is what actually protects these accounts —');

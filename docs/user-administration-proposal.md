@@ -208,8 +208,20 @@ a niža vrednost ne košta ništa u udobnosti — samo daje napadaču srazmeran
 popust. Pri 1.000 tamo gde staje 4.000, tri četvrtine zaštite koja je bila na
 raspolaganju jednostavno se ne koristi.
 
-**Pokrenuti `benchmarkPbkdf2()` ponovo i upisati ono što ispiše.** Očekuje se red
-veličine 4.000.
+Ponovljeno merenje, sa zagrevanjem:
+
+| Iteracija | Vreme | Po iteraciji |
+|---|---|---|
+| 200 | 134 ms | 0,67 ms |
+| 500 | 328 ms | 0,66 ms |
+| 1.000 | 831 ms | 0,83 ms |
+
+**Preporuka: 3.000 iteracija** — računato po najsporijem uzorku, pa
+konzervativno. To je vrednost koja ide u `Config` pod `pbkdf2Iterations`.
+
+Posledica koju treba očekivati: prijava će trajati oko **2,5 s umesto 0,8 s**.
+To nije regresija nego namera — trostruko skuplja svakome ko pogađa lozinku iz
+ukradene tabele, a korisnik to sretne jednom u dvanaest sati.
 
 Vredi zabeležiti i kao obrazac: merenje je u ovom projektu tri puta ispravilo
 procenu, a ovog puta je ispravilo i prethodno merenje.
