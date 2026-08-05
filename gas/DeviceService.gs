@@ -17,40 +17,28 @@ const DeviceService = (function () {
   /** Skip the lastSeenAt write unless the stored value is at least this old. */
   const TOUCH_INTERVAL_MS = 60 * 60 * 1000;
 
-  // --- Cache ---
-
-  function _cache() {
-    return CacheService.getScriptCache();
-  }
+  // --- Cached reads ---
 
   function _key(deviceId) {
     return `d:${deviceId}`;
   }
 
+  /**
+   * Drop the copy. Called on every write, so revoking a device takes effect on
+   * the next request however long the mirror window is.
+   */
   function _invalidate(deviceId) {
-    try {
-      _cache().remove(_key(deviceId));
-    } catch (e) {
-      // Nothing to do — a stale entry expires on its own within the TTL.
-    }
+    AuthMirror.remove(_key(deviceId));
   }
 
   function getById(deviceId) {
     if (!deviceId) return null;
-    try {
-      const raw = _cache().get(_key(deviceId));
-      if (raw) return JSON.parse(raw);
-    } catch (e) {
-      // fall through to the sheet
-    }
+    const key = _key(deviceId);
+    const mirrored = AuthMirror.get(key);
+    if (mirrored) return mirrored;
+
     const device = SheetService.getDevice(deviceId);
-    if (device) {
-      try {
-        _cache().put(_key(deviceId), JSON.stringify(device), Config.getAuthCacheTtlSeconds());
-      } catch (e) {
-        // cache failures are not request failures
-      }
-    }
+    if (device) AuthMirror.put(key, device);
     return device;
   }
 

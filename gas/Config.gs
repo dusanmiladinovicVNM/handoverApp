@@ -182,9 +182,15 @@ const Config = (function () {
    * It is worth paying for: resolving a session is the first thing to touch
    * Sheets in any request, so it was auth that paid to open the workbook —
    * measured at 4.9 s on a request whose own work took 123 ms.
+   *
+   * Six hours, which is also the ceiling CacheService will accept. Under it sits
+   * a durable copy in Script Properties, so an evicted cache costs a key-value
+   * read rather than opening the workbook — see AuthMirror.
+   *
+   * Set to 0 to disable both layers and read through to the sheet every time.
    */
   function getAuthCacheTtlSeconds() {
-    return getNumber('authCacheTtlSeconds', 1800);
+    return getNumber('authCacheTtlSeconds', 21600);
   }
 
   /**
