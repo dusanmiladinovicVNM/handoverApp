@@ -541,14 +541,9 @@ za fazu 2, zajedno sa celim frontendom.
 
 Postupak puštanja u rad, redom:
 
-0. **Dozvola za slanje mejla.** U editoru: ⚙ *Project Settings* → uključiti
-   *Show "appsscript.json" manifest file in editor*, pa u `oauthScopes` dodati
-
-   ```
-   "https://www.googleapis.com/auth/script.send_mail"
-   ```
-
-   Ceo spisak koji ovaj backend koristi:
+0. **Dozvole i autorizacija.** Manifest je sada u repou, `gas/appsscript.json`.
+   U editoru: ⚙ *Project Settings* → uključiti *Show "appsscript.json" manifest
+   file in editor*, pa preneti sadržaj.
 
    | Scope | Zašto |
    |---|---|
@@ -557,10 +552,25 @@ Postupak puštanja u rad, redom:
    | `.../auth/documents` | `DocumentApp` — generisanje PDF-a |
    | `.../auth/script.send_mail` | `MailApp` — linkovi za lozinku |
 
-   Posle izmene pokrenuti bilo koju funkciju i **prihvatiti novu autorizaciju**.
-   Ako `oauthScopes` uopšte ne postoji u manifestu, Apps Script sam prepoznaje
-   potrebne dozvole — ali ako spisak postoji, drži se njega i `MailApp` puca sa
-   `Specified permissions are not sufficient`. Ne dirati `timeZone`.
+   Puna `drive` dozvola je nužna, ne preterivanje: `getFileById` i
+   `getFolderById` rade nad šablonom i korenskim folderom koje skripta nije
+   napravila, a uža `drive.file` pokriva samo ono što je aplikacija sama
+   kreirala.
+
+   Ranije su u spisku bile i `script.external_request` i `userinfo.email`.
+   Nijedna se ne koristi — `UrlFetchApp` i `Session.getActiveUser` ne postoje
+   nigde u kodu; ostale su iz vremena Google prijave, koje odavno nema. Izbačene
+   su, jer dozvola koja se ne koristi je ovlašćenje dato bez ijednog razloga.
+
+   **Sam upis skoupa u manifest ništa ne menja dok se skripta ponovo ne
+   autorizuje.** Postojeći grant izdat je za stariji spisak, pa `MailApp` i
+   dalje puca sa `Specified permissions are not sufficient`. Posle izmene
+   pokrenuti bilo koju funkciju i prihvatiti ekran za autorizaciju. Ako se ne
+   pojavi: myaccount.google.com → *Security* → *Third-party apps* → ukloniti
+   pristup ovoj skripti, pa pokrenuti ponovo. Skidanje dve nepotrebne dozvole i
+   samo po sebi menja spisak, što obično isprovocira novi ekran.
+
+   `timeZone` ne dirati — od njega zavise datumi inspekcija.
 
 1. `bootstrapSheet()` — pravi listove `Users` i `Devices`, dodaje kolonu
    `assignedTo` i upisuje nove ključeve u `Config`
