@@ -74,11 +74,26 @@ const Config = (function () {
     return cfg[key] !== undefined ? cfg[key] : fallback;
   }
 
+  /**
+   * A value that will not parse falls back to the default, and says so.
+   *
+   * The silent version of this hid a real fault for weeks: the Config sheet had
+   * `passwordMinLength` with the word `passwordMinLength` in its value column,
+   * and because 16 is also the default, nothing looked wrong anywhere. A
+   * setting that appears to be configured but is not is worse than one that is
+   * missing.
+   */
   function getNumber(key, fallback) {
     const cfg = _loadConfigSheet();
-    if (cfg[key] === undefined) return fallback;
+    if (cfg[key] === undefined || cfg[key] === '') return fallback;
     const n = Number(cfg[key]);
-    return isNaN(n) ? fallback : n;
+    if (isNaN(n)) {
+      Utils.log('WARN', 'Config value is not a number, using the default', {
+        key: key, value: cfg[key], using: fallback,
+      });
+      return fallback;
+    }
+    return n;
   }
 
   function invalidateCache() {
@@ -113,8 +128,13 @@ const Config = (function () {
    * PBKDF2 work factor.
    *
    * The default is deliberately low. Measure on the real deployment with
-   * benchmarkPbkdf2() and set this to what it prints — the largest value that
-   * keeps a sign-in near 2.5 s, which on this deployment is around 3000.
+   * benchmarkPbkdf2() and set this to what it prints.
+   *
+   * Do not expect a stable number. Successive runs on the same deployment have
+   * measured 0.63, 0.82, 0.92 and 1.22 ms per iteration, so the recommendation
+   * moves between roughly 2000 and 3000 depending on how busy the platform is
+   * that minute. Anywhere in that band is right; chasing the exact figure is
+   * not, and neither is treating one run as the truth.
    *
    * Raising it does not invalidate existing passwords: the iteration count is
    * stored alongside each hash and old rows are upgraded on next login. So
@@ -168,11 +188,15 @@ const Config = (function () {
   /**
    * How long a cached Users/Devices row stays valid, in seconds.
    *
-   * Thirty minutes, not the sixty seconds this started at. The short window was
-   * guarding against something the code already handles: every path that
-   * disables an account, changes a role or revokes a device goes through
-   * UserService.update or DeviceService.revoke, and both drop the cached entry
-   * on the spot. Revocation through the app is immediate at any TTL.
+   * Six hours, which is also the ceiling CacheService will accept. Under it sits
+   * a durable copy in Script Properties, so an evicted cache costs a key-value
+   * read rather than opening the workbook — see AuthMirror.
+   *
+   * It started at sixty seconds, and the short window was guarding against
+   * something the code already handles: every path that disables an account,
+   * changes a role or revokes a device goes through UserService.update or
+   * DeviceService.revoke, and both drop the cached entry on the spot. Revocation
+   * through the app is immediate at any TTL.
    *
    * What the window actually bounds is a change made by editing the spreadsheet
    * by hand, which then takes up to this long to be noticed. That is a good
@@ -183,9 +207,9 @@ const Config = (function () {
    * Sheets in any request, so it was auth that paid to open the workbook —
    * measured at 4.9 s on a request whose own work took 123 ms.
    *
-   * Six hours, which is also the ceiling CacheService will accept. Under it sits
-   * a durable copy in Script Properties, so an evicted cache costs a key-value
-   * read rather than opening the workbook — see AuthMirror.
+   * This value lives in the Config sheet, and the sheet wins. Raising the
+   * default here does nothing to an installation whose row already says 60 —
+   * which is what happened, and what checkConfig() now reports.
    *
    * Set to 0 to disable both layers and read through to the sheet every time.
    */
