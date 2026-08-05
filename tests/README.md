@@ -23,12 +23,22 @@ every request rather than trusted from the token.
 
 | Suite | What it protects |
 |---|---|
+| `load-order.test.js` | Every `.gs` file loads whatever order Apps Script picks; the routing table |
 | `password.test.js` | PBKDF2 output, checked against `crypto.pbkdf2Sync` |
 | `auth.test.js` | Token issuing and resolution, revocation, forgery, the tenant flow |
 | `account.test.js` | Login, lockout, account enumeration, password set/change/reset, refresh |
 
-Three of these matter more than the rest, because each protects something that
+Four of these matter more than the rest, because each protects something that
 would keep *looking* correct after it broke:
+
+**Load order.** Apps Script shares one global scope across files but evaluates
+them in order, and each service is a `const`, so a name is unusable until its
+own file has run. A file that dereferences another service while loading works
+or throws purely by position — and position shifts whenever a file is added.
+This is not hypothetical: adding the account services moved `Router.gs` ahead of
+`SignatureService.gs`, and `bootstrapSheet()` began failing with
+"SignatureService is not defined" — an error naming a file that had nothing to
+do with the call.
 
 **PBKDF2 against Node's own implementation.** A key derivation written by hand
 can be wrong in a way nothing else notices — a wrong-but-consistent function
