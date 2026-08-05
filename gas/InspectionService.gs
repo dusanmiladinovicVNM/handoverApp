@@ -7,7 +7,7 @@
 const InspectionService = (function () {
 
   function createInspection(authCtx, data) {
-    AuthService.requireAdmin(authCtx);
+    AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionType', 'string');
     Utils.requireField(data, 'schemaId', 'string');
     Utils.requireField(data, 'property', 'object');
@@ -65,6 +65,11 @@ const InspectionService = (function () {
       tenantTokenHash: Utils.sha256(tenantToken),
       lockedAt: '',
       signedAt: '',
+      // Who the inspection is *for*, which is not always who typed it in. The
+      // office commonly opens the job and an inspector goes out to do it, so
+      // ownership cannot be inferred from createdBy — see phase 3, where this
+      // column starts governing what an inspector may see.
+      assignedTo: UserService.normalizeEmail(data.assignedTo) || authCtx.email || '',
     };
 
     SheetService.createInspection(inspection);
@@ -230,7 +235,7 @@ const InspectionService = (function () {
   }
 
   function lockInspection(authCtx, data) {
-    AuthService.requireAdmin(authCtx);
+    AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionId', 'string');
 
     const inspection = SheetService.getInspection(data.inspectionId);
@@ -294,7 +299,7 @@ const InspectionService = (function () {
   }
 
   function regenerateTenantToken(authCtx, data) {
-    AuthService.requireAdmin(authCtx);
+    AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionId', 'string');
 
     const inspection = SheetService.getInspection(data.inspectionId);
@@ -324,7 +329,7 @@ const InspectionService = (function () {
   }
 
   function listInspections(authCtx, data) {
-    AuthService.requireAdmin(authCtx);
+    AuthService.requireStaff(authCtx);
     const filter = (data && data.filter) || {};
     const all = SheetService.listInspections(filter);
 

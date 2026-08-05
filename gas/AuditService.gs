@@ -21,6 +21,15 @@ const AuditService = (function () {
     }
   }
 
+  /**
+   * Account and sign-in events. These belong to a person, not an inspection,
+   * so inspectionId is left empty — the same append-only log, filtered
+   * differently when read.
+   */
+  function logAuth(actor, eventType, details) {
+    log('', actor, eventType, details);
+  }
+
   function getEventsForInspection(authCtx, data) {
     AuthService.requireAdmin(authCtx);
     Utils.requireField(data, 'inspectionId', 'string');
@@ -45,5 +54,5 @@ const AuditService = (function () {
     }
   }
 
-  return { log, getEventsForInspection };
+  return { log, logAuth, getEventsForInspection };
 })(); 

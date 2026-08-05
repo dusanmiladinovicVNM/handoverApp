@@ -2,26 +2,49 @@
  * AuthService.gs
  * Authentication and authorization.
  *
- * Two token types:
- *  - Tenant token: { iid, role: 'tenant', exp, nonce }
- *      - Bound to one inspection (iid)
- *      - nonce must match inspection.currentNonce
- *      - revoked by rotating inspection.currentNonce (regenerate or unlock)
- *  - Admin token: { role: 'admin', exp, nonce, label }
- *      - Not bound to any inspection
- *      - nonce must be in PropertiesService 'ADMIN_NONCES' (JSON array)
- *      - revoked by removing nonce from that list
- *      - label is a human-readable description ("Dušan iPhone") for audit
+ * Token types, all in the form base64url(payload).hmac:
  *
- * Google login is no longer used (Apps Script Web App with "Anyone" access does
- * not provide caller identity).
+ *  - Session  { typ:'s', uid, did, exp, nonce }        12 hours
+ *      Carries identity, never authority. Role and status are read from the
+ *      Users row on every request — see below.
+ *
+ *  - Device   { typ:'d', uid, did, exp, nonce }        60 days
+ *      Only ever exchanged for a fresh session by AccountService.refreshSession.
+ *      Never accepted as a session itself.
+ *
+ *  - Set password { typ:'setpw', uid, exp, nonce }     48 hours, single use
+ *      Sent by mail so a user can choose their own password.
+ *
+ *  - Tenant   { iid, role:'tenant', exp, nonce }
+ *      Unchanged. Bound to one inspection, revoked by rotating that
+ *      inspection's currentNonce.
+ *
+ *  - Admin    { role:'admin', exp, nonce, label }      DEPRECATED
+ *      The pre-accounts credential. Still accepted so that phase 1 changes
+ *      nothing for anyone already signed in; removed in phase 3 together with
+ *      the ADMIN_NONCES property.
+ *
+ * THE RULE: a session token names who you are, never what you may do. Authority
+ * comes from the Users sheet on every single request. Were the role baked into
+ * the signed payload instead, revoking someone's admin rights would not take
+ * effect until their token expired — which is not what an administrator means
+ * when they click the button.
+ *
+ * Google login is not usable here: an Apps Script Web App deployed with
+ * "Anyone" access provides no caller identity.
  */
 
 const AuthService = (function () {
 
   const ADMIN_NONCES_KEY = 'ADMIN_NONCES';
 
-  // --- Admin nonce list (Script Properties) ---
+  const TOKEN_SESSION = 's';
+  const TOKEN_DEVICE = 'd';
+  const TOKEN_SETPW = 'setpw';
+
+  // ============================================================
+  // Legacy admin nonce list (Script Properties) — removed in phase 3
+  // ============================================================
 
   function _loadAdminNonces() {
     const raw = PropertiesService.getScriptProperties().getProperty(ADMIN_NONCES_KEY);
@@ -46,8 +69,7 @@ const AuthService = (function () {
   }
 
   function _hasAdminNonce(nonce) {
-    const list = _loadAdminNonces();
-    return list.some(e => e && e.nonce === nonce);
+    return _loadAdminNonces().some(e => e && e.nonce === nonce);
   }
 
   function _removeAdminNonce(nonce) {
@@ -57,26 +79,102 @@ const AuthService = (function () {
     return list.length !== filtered.length;
   }
 
-  // --- Token generation ---
+  // ============================================================
+  // Signing
+  // ============================================================
+
+  function _signPayload(payload) {
+    const payloadB64 = Utils.base64UrlEncodeString(JSON.stringify(payload));
+    const sig = Utils.hmacSha256(payloadB64, Config.getTokenSecret());
+    return `${payloadB64}.${sig}`;
+  }
+
+  /**
+   * Signature and expiry only. Everything semantic — is the device revoked, is
+   * the account still active — is decided by the caller.
+   */
+  function _verifySigned(token) {
+    if (!token || typeof token !== 'string') return null;
+    const parts = token.split('.');
+    if (parts.length !== 2) return null;
+    const [payloadB64, sigB64] = parts;
+
+    const expectedSig = Utils.hmacSha256(payloadB64, Config.getTokenSecret());
+    if (!Utils.safeEqual(sigB64, expectedSig)) return null;
+
+    let payload;
+    try {
+      payload = JSON.parse(Utils.base64UrlDecodeToString(payloadB64));
+    } catch (e) {
+      return null;
+    }
+    if (!payload || !payload.exp || !payload.nonce) return null;
+    if (payload.exp < Utils.nowEpochSeconds()) return null;
+    return payload;
+  }
+
+  // ============================================================
+  // Token generation
+  // ============================================================
+
+  function generateSessionToken(userId, deviceId, deviceNonce) {
+    return _signPayload({
+      typ: TOKEN_SESSION,
+      uid: userId,
+      did: deviceId,
+      exp: Utils.nowEpochSeconds() + Config.getSessionTtlHours() * 3600,
+      nonce: deviceNonce,
+    });
+  }
+
+  function generateDeviceToken(userId, deviceId, deviceNonce) {
+    return _signPayload({
+      typ: TOKEN_DEVICE,
+      uid: userId,
+      did: deviceId,
+      exp: Utils.nowEpochSeconds() + Config.getDeviceTtlDays() * 24 * 3600,
+      nonce: deviceNonce,
+    });
+  }
+
+  /**
+   * The nonce is derived from the account's *current* password hash. Setting a
+   * password changes that hash, so the link that was used to set it stops
+   * verifying — single use, with no extra column and no cache entry. That
+   * matters here because CacheService caps entries at six hours, while these
+   * links must live for 48.
+   *
+   * It also means any older outstanding link dies at the same moment, which is
+   * the behaviour you want from a password reset.
+   */
+  function _setPasswordNonce(user) {
+    return Utils.hmacSha256(
+      `setpw|${user.userId}|${user.passHash || ''}`,
+      Config.getTokenSecret()
+    );
+  }
+
+  function generateSetPasswordToken(user) {
+    return _signPayload({
+      typ: TOKEN_SETPW,
+      uid: user.userId,
+      exp: Utils.nowEpochSeconds() + Config.getSetPasswordTtlHours() * 3600,
+      nonce: _setPasswordNonce(user),
+    });
+  }
 
   function generateTenantToken(inspectionId, ttlHours, nonce) {
-    const payload = {
+    return _signPayload({
       iid: inspectionId,
       role: 'tenant',
       exp: Utils.nowEpochSeconds() + (ttlHours * 3600),
       nonce: nonce,
-    };
-    return _signPayload(payload);
+    });
   }
 
-  /**
-   * Generate an admin token. Stores its nonce in the admin nonce list.
-   *
-   * @param ttlHours  Long TTL is fine (admin keeps device).
-   * @param label     Human description for audit/management UI.
-   */
+  /** DEPRECATED — kept for the phase 1/2 transition only. */
   function generateAdminToken(ttlHours, label) {
-    const nonce = Utils.generateNonce() + Utils.generateNonce(); // 16 hex chars
+    const nonce = Utils.secureRandomHex(16);
     const payload = {
       role: 'admin',
       exp: Utils.nowEpochSeconds() + (ttlHours * 3600),
@@ -100,37 +198,20 @@ const AuthService = (function () {
     return generateTenantToken(inspectionId, ttlHours, nonce);
   }
 
-  function _signPayload(payload) {
-    const payloadStr = JSON.stringify(payload);
-    const payloadB64 = Utils.base64UrlEncodeString(payloadStr);
-    const sig = Utils.hmacSha256(payloadB64, Config.getTokenSecret());
-    return `${payloadB64}.${sig}`;
-  }
+  // ============================================================
+  // Token verification
+  // ============================================================
 
-  // --- Token verification ---
-
+  /**
+   * Verify a tenant or legacy admin token, including revocation.
+   * Session tokens are resolved through resolveAuth, which needs the Users row.
+   */
   function verifyToken(token) {
-    if (!token || typeof token !== 'string') return null;
-    const parts = token.split('.');
-    if (parts.length !== 2) return null;
-    const [payloadB64, sigB64] = parts;
-
-    const expectedSig = Utils.hmacSha256(payloadB64, Config.getTokenSecret());
-    if (!Utils.safeEqual(sigB64, expectedSig)) return null;
-
-    let payload;
-    try {
-      const payloadStr = Utils.base64UrlDecodeToString(payloadB64);
-      payload = JSON.parse(payloadStr);
-    } catch (e) {
-      return null;
-    }
-    if (!payload || !payload.role || !payload.exp || !payload.nonce) return null;
-    if (payload.exp < Utils.nowEpochSeconds()) return null;
+    const payload = _verifySigned(token);
+    if (!payload || !payload.role) return null;
 
     if (payload.role === 'admin') {
-      if (!_hasAdminNonce(payload.nonce)) return null;
-      return payload;
+      return _hasAdminNonce(payload.nonce) ? payload : null;
     }
 
     if (payload.role === 'tenant') {
@@ -144,51 +225,169 @@ const AuthService = (function () {
     return null;
   }
 
-  // --- Auth resolution ---
+  /**
+   * Resolve a set-password token to its user, or null.
+   * Also returns null once the link has been used, or if the account was
+   * disabled after the mail went out.
+   */
+  function verifySetPasswordToken(token) {
+    const payload = _verifySigned(token);
+    if (!payload || payload.typ !== TOKEN_SETPW || !payload.uid) return null;
+
+    const user = UserService.getById(payload.uid);
+    if (!user || user.status !== 'active') return null;
+    if (!Utils.safeEqual(String(payload.nonce), _setPasswordNonce(user))) return null;
+    return user;
+  }
+
+  /**
+   * Resolve a device token to { user, device }, or null.
+   * Used only by refreshSession — a device token is never a session.
+   */
+  function verifyDeviceToken(token) {
+    const payload = _verifySigned(token);
+    if (!payload || payload.typ !== TOKEN_DEVICE || !payload.uid || !payload.did) return null;
+
+    const device = DeviceService.getById(payload.did);
+    if (!DeviceService.checkUsable(device, payload.nonce).ok) return null;
+    if (device.userId !== payload.uid) return null;
+
+    const user = UserService.getById(payload.uid);
+    if (!user || user.status !== 'active') return null;
+    return { user: user, device: device };
+  }
+
+  // ============================================================
+  // Auth resolution
+  // ============================================================
 
   function resolveAuth(authBlock) {
     if (!authBlock || !authBlock.type) {
       throw new HandoverError('UNAUTHORIZED', 'Missing auth block.');
     }
 
-    if (authBlock.type === 'token') {
-      const payload = verifyToken(authBlock.token);
-      if (!payload) {
-        throw new HandoverError('UNAUTHORIZED', 'Invalid or expired token.');
-      }
-      if (payload.role === 'admin') {
-        return {
-          type: 'token',
-          role: 'admin',
-          isAdmin: true,
-          adminLabel: payload.label || '',
-          actorString: `admin:${payload.label || authBlock.token.substring(0, 8)}`,
-        };
-      }
-      return {
-        type: 'token',
-        role: 'tenant',
-        inspectionId: payload.iid,
-        isAdmin: false,
-        actorString: `tenant_token:${authBlock.token.substring(0, 8)}`,
-      };
-    }
-
     if (authBlock.type === 'google') {
       throw new HandoverError(
         'UNAUTHORIZED',
-        'Google login is not supported by this deployment. Use an admin token.'
+        'Google login is not supported by this deployment. Sign in with your email address.'
       );
     }
 
-    throw new HandoverError('UNAUTHORIZED', `Unknown auth type: ${authBlock.type}`);
+    if (authBlock.type !== 'token') {
+      throw new HandoverError('UNAUTHORIZED', `Unknown auth type: ${authBlock.type}`);
+    }
+
+    const payload = _verifySigned(authBlock.token);
+    if (!payload) {
+      throw new HandoverError('UNAUTHORIZED', 'Invalid or expired token.');
+    }
+
+    if (payload.typ === TOKEN_SESSION) return _resolveSession(payload);
+    if (payload.typ === TOKEN_DEVICE) {
+      throw new HandoverError(
+        'UNAUTHORIZED', 'This token cannot be used directly. Refresh the session first.');
+    }
+    if (payload.role === 'tenant') return _resolveTenant(payload, authBlock.token);
+    if (payload.role === 'admin') return _resolveLegacyAdmin(payload, authBlock.token);
+
+    throw new HandoverError('UNAUTHORIZED', 'Invalid or expired token.');
   }
 
-  // --- Permission checks ---
+  function _resolveSession(payload) {
+    if (!payload.uid || !payload.did) {
+      throw new HandoverError('UNAUTHORIZED', 'Invalid or expired token.');
+    }
+
+    const device = DeviceService.getById(payload.did);
+    const usable = DeviceService.checkUsable(device, payload.nonce);
+    if (!usable.ok || device.userId !== payload.uid) {
+      throw new HandoverError(
+        'UNAUTHORIZED', 'This session is no longer valid. Please sign in again.');
+    }
+
+    // Authority is read here, per request — never taken from the token.
+    const user = UserService.getById(payload.uid);
+    if (!user) {
+      throw new HandoverError('UNAUTHORIZED', 'This session is no longer valid.');
+    }
+    if (user.status !== 'active') {
+      throw new HandoverError('UNAUTHORIZED', 'This account has been disabled.');
+    }
+
+    DeviceService.touch(device);
+
+    return {
+      type: 'token',
+      role: user.role,
+      isAdmin: user.role === 'admin',
+      userId: user.userId,
+      email: user.email,
+      name: user.name,
+      deviceId: device.deviceId,
+      actorString: `user:${user.email}`,
+    };
+  }
+
+  function _resolveTenant(payload, token) {
+    if (!payload.iid) {
+      throw new HandoverError('UNAUTHORIZED', 'Invalid or expired token.');
+    }
+    const inspection = SheetService.getInspection(payload.iid);
+    if (!inspection || inspection.currentNonce !== payload.nonce) {
+      throw new HandoverError('UNAUTHORIZED', 'Invalid or expired token.');
+    }
+    return {
+      type: 'token',
+      role: 'tenant',
+      inspectionId: payload.iid,
+      isAdmin: false,
+      actorString: `tenant_token:${token.substring(0, 8)}`,
+    };
+  }
+
+  /** DEPRECATED — removed in phase 3. */
+  function _resolveLegacyAdmin(payload, token) {
+    if (!_hasAdminNonce(payload.nonce)) {
+      throw new HandoverError('UNAUTHORIZED', 'Invalid or expired token.');
+    }
+    return {
+      type: 'token',
+      role: 'admin',
+      isAdmin: true,
+      adminLabel: payload.label || '',
+      legacy: true,
+      actorString: `admin:${payload.label || token.substring(0, 8)}`,
+    };
+  }
+
+  // ============================================================
+  // Permission checks
+  // ============================================================
 
   function requireAdmin(authCtx) {
-    if (!authCtx.isAdmin) {
+    if (!authCtx || !authCtx.isAdmin) {
       throw new HandoverError('FORBIDDEN', 'This action requires admin access.');
+    }
+  }
+
+  /**
+   * Any signed-in member of staff — admin or inspector — but not a tenant.
+   *
+   * Before accounts existed there were only two kinds of caller, so "not a
+   * tenant" and "admin" were the same test and requireAdmin did both jobs.
+   * With a second staff role the two come apart: an inspector doing fieldwork
+   * needs to list, edit and finalise inspections, and gating that on admin
+   * would leave the role able to sign in and do nothing at all.
+   *
+   * What stays admin-only is supervisory: reopening a signed inspection,
+   * reading the audit log, and managing accounts.
+   *
+   * This says nothing about *which* inspections. That is phase 3, where
+   * assignedTo starts narrowing the list.
+   */
+  function requireStaff(authCtx) {
+    if (!authCtx || authCtx.role === 'tenant') {
+      throw new HandoverError('FORBIDDEN', 'This action requires a staff account.');
     }
   }
 
@@ -207,7 +406,9 @@ const AuthService = (function () {
     }
   }
 
-  // --- Admin token management ---
+  // ============================================================
+  // Legacy admin token management — removed in phase 3
+  // ============================================================
 
   function listAdminTokens() {
     return _loadAdminNonces().map(e => ({
@@ -223,14 +424,24 @@ const AuthService = (function () {
   }
 
   return {
+    // Generation
     generateToken,
     generateTenantToken,
     generateAdminToken,
+    generateSessionToken,
+    generateDeviceToken,
+    generateSetPasswordToken,
+    // Verification
     verifyToken,
+    verifySetPasswordToken,
+    verifyDeviceToken,
     resolveAuth,
+    // Permissions
     requireAdmin,
+    requireStaff,
     requireMatchingInspection,
     requireMatchingRole,
+    // Legacy management
     listAdminTokens,
     revokeAdminToken,
   };

@@ -18,7 +18,7 @@
 const PdfService = (function () {
 
   function finalizeInspection(authCtx, data) {
-    AuthService.requireAdmin(authCtx);
+    AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionId', 'string');
 
     const inspection = SheetService.getInspection(data.inspectionId);

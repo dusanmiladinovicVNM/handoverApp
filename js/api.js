@@ -44,6 +44,21 @@ async function call(action, data, timeoutMs) {
   if (!_authContext) {
     throw new ApiError('UNAUTHORIZED', 'No auth context set.');
   }
+  return _send(action, data, timeoutMs, _authContext);
+}
+
+/**
+ * Call one of the actions that run before a session exists — signing in,
+ * setting a password, asking for a reset link, refreshing.
+ *
+ * These are listed in PUBLIC_ACTIONS on the server, which dispatches them
+ * without resolving auth at all, so no auth block is sent.
+ */
+async function callPublic(action, data, timeoutMs) {
+  return _send(action, data, timeoutMs, null);
+}
+
+async function _send(action, data, timeoutMs, auth) {
   if (!BACKEND_URL || BACKEND_URL.startsWith('PASTE_')) {
     throw new ApiError(
       'INTERNAL_ERROR',
@@ -59,7 +74,7 @@ async function call(action, data, timeoutMs) {
     response = await fetch(BACKEND_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action, auth: _authContext, data: data || {} }),
+      body: JSON.stringify({ action, auth: auth, data: data || {} }),
       signal: controller.signal,
       redirect: 'follow',
     });
@@ -98,6 +113,33 @@ async function call(action, data, timeoutMs) {
 // ============================================================
 
 export const api = {
+  // --- Sign-in (no session required) ---
+  login: (data) => callPublic('login', data),
+  setPassword: (data) => callPublic('setPassword', data),
+  requestPasswordReset: (email) => callPublic('requestPasswordReset', { email }),
+  refreshSession: (deviceToken) => callPublic('refreshSession', { deviceToken }),
+
+  // --- Own account ---
+  me: () => call('me'),
+  signOut: () => call('signOut'),
+  changePassword: (oldPassword, newPassword) =>
+    call('changePassword', { oldPassword, newPassword }),
+
+  // --- Account administration ---
+  listUsers: () => call('listUsers'),
+  createUser: (name, email, role, notes) =>
+    call('createUser', { name, email, role, notes }),
+  setUserStatus: (userId, status) => call('setUserStatus', { userId, status }),
+  setUserRole: (userId, role) => call('setUserRole', { userId, role }),
+  unlockUser: (userId) => call('unlockUser', { userId }),
+  sendPasswordLink: (userId) => call('sendPasswordLink', { userId }),
+  listUserDevices: (userId) => call('listUserDevices', { userId }),
+  revokeDevice: (deviceId) => call('revokeDevice', { deviceId }),
+  revokeAllDevices: (userId) => call('revokeAllDevices', { userId }),
+  getAuthLog: (userId, limit) => call('getAuthLog', { userId, limit }),
+  assignInspection: (inspectionId, assignedTo) =>
+    call('assignInspection', { inspectionId, assignedTo }),
+
   // --- Schemas ---
   getSchemas: () => call('getSchemas'),
   getSchema: (schemaId) => call('getSchema', { schemaId }),

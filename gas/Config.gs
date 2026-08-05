@@ -111,6 +111,58 @@ const Config = (function () {
     return getNumber('imageJpegQuality', 0.75);
   }
 
+  // --- Accounts and sessions ---
+
+  /**
+   * PBKDF2 work factor.
+   *
+   * The default is deliberately low. Measure on the real deployment with
+   * benchmarkPbkdf2() and raise this to the largest value that keeps login
+   * under one second — see docs/user-administration-proposal.md, section 5.
+   * Raising it does not invalidate existing passwords: the iteration count is
+   * stored alongside each hash and old rows are upgraded on next login.
+   */
+  function getPbkdf2Iterations() {
+    return getNumber('pbkdf2Iterations', 1000);
+  }
+
+  /**
+   * Sixteen, not the twelve first proposed. Measurement on the real deployment
+   * put a PBKDF2 iteration at ~2.5 ms, almost all of it the JavaScript/platform
+   * boundary — a cost the attacker does not pay. The reachable work factor is
+   * therefore low enough that length, not the derivation, is what protects
+   * these accounts. At sixteen characters people write a phrase instead of a
+   * word, which is worth far more here than any number of iterations.
+   */
+  function getPasswordMinLength() {
+    return getNumber('passwordMinLength', 16);
+  }
+
+  function getSessionTtlHours() {
+    return getNumber('sessionTtlHours', 12);
+  }
+
+  function getDeviceTtlDays() {
+    return getNumber('deviceTtlDays', 60);
+  }
+
+  function getSetPasswordTtlHours() {
+    return getNumber('setPasswordTtlHours', 48);
+  }
+
+  function getLoginMaxFailures() {
+    return getNumber('loginMaxFailures', 5);
+  }
+
+  function getLoginLockMinutes() {
+    return getNumber('loginLockMinutes', 15);
+  }
+
+  /** How long a cached Users/Devices row stays valid, in seconds. */
+  function getAuthCacheTtlSeconds() {
+    return getNumber('authCacheTtlSeconds', 60);
+  }
+
   return {
     getWorkbookId,
     getInspectionsRootFolderId,
@@ -126,5 +178,13 @@ const Config = (function () {
     getMaxAttachmentsPerInspection,
     getImageMaxDimPx,
     getImageJpegQuality,
+    getPbkdf2Iterations,
+    getPasswordMinLength,
+    getSessionTtlHours,
+    getDeviceTtlDays,
+    getSetPasswordTtlHours,
+    getLoginMaxFailures,
+    getLoginLockMinutes,
+    getAuthCacheTtlSeconds,
   };
 })();

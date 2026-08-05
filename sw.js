@@ -8,7 +8,11 @@
  * Bump CACHE_VERSION whenever app shell files change.
  */
 
-const CACHE_VERSION = 'handover-v1';
+// v2: accounts and password sign-in — app.js, auth.js, api.js, state.js,
+// pages.js and components.css all changed. Without the bump, anyone who has
+// already opened the app keeps being served the old sign-in screen from cache,
+// which then calls actions the new backend has replaced.
+const CACHE_VERSION = 'handover-v2';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 

@@ -106,7 +106,7 @@ const AttachmentService = (function () {
   }
 
   function deleteAttachment(authCtx, data) {
-    AuthService.requireAdmin(authCtx);
+    AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionId', 'string');
     Utils.requireField(data, 'attachmentId', 'string');
 
