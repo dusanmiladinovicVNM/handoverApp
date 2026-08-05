@@ -12,6 +12,8 @@
 
 import { setAuth, api } from './api.js';
 import { setState } from './state.js';
+import { navigate } from './router.js';
+import { readJson, writeJson, clearCaches, CACHE_KEYS } from './utils/store.js';
 
 const SESSION_KEY = 'handover.sessionToken';
 const DEVICE_KEY = 'handover.deviceToken';
@@ -54,6 +56,7 @@ export function clearTokens() {
   write(SESSION_KEY, '');
   write(DEVICE_KEY, '');
   RETIRED_KEYS.forEach(key => write(key, ''));
+  clearCaches();
 }
 
 // --- Naming this device ---
@@ -85,6 +88,7 @@ export function suggestDeviceLabel() {
 
 function applySession(result) {
   storeTokens(result);
+  writeJson(CACHE_KEYS.user, result.user);
   setAuth({ type: 'token', token: result.sessionToken });
   setState({
     authMode: 'user',
@@ -121,18 +125,35 @@ export async function setPassword({ token, password, remember, deviceLabel }) {
 /**
  * Restore a signed-in state at boot.
  *
- * The session token is tried first because it costs one call and usually
- * works; the device token is the fallback that avoids asking for a password
- * every twelve hours.
+ * When the device holds both a session token and a remembered profile, this
+ * returns without waiting for the network. Opening the app used to block on
+ * me() before the router even started, and only then fetch the list — two
+ * requests in series, four to six seconds of blank screen, every single time.
+ *
+ * Nothing is given away by trusting the stored profile. It decides what to
+ * *draw*, never what is allowed: the server re-reads the role from the Users
+ * sheet on every request, so an edited copy in localStorage buys a menu item
+ * and a refusal. The session is verified in the background, and a token that
+ * has been revoked lands the user back on the sign-in screen a second later.
  *
  * Returns 'user' or 'none'.
  */
 export async function restoreSession() {
   const sessionToken = loadSessionToken();
+  const remembered = readJson(CACHE_KEYS.user);
+
+  if (sessionToken && remembered) {
+    setAuth({ type: 'token', token: sessionToken });
+    setState({ authMode: 'user', user: remembered });
+    _verifyInBackground();
+    return 'user';
+  }
+
   if (sessionToken) {
     setAuth({ type: 'token', token: sessionToken });
     try {
       const me = await api.me();
+      writeJson(CACHE_KEYS.user, me.user);
       setState({ authMode: 'user', user: me.user });
       return 'user';
     } catch (_) {
@@ -140,23 +161,56 @@ export async function restoreSession() {
     }
   }
 
-  const deviceToken = loadDeviceToken();
-  if (deviceToken) {
-    try {
-      const refreshed = await api.refreshSession(deviceToken);
-      storeTokens({ sessionToken: refreshed.sessionToken, deviceToken });
-      setAuth({ type: 'token', token: refreshed.sessionToken });
-      setState({ authMode: 'user', user: refreshed.user });
-      return 'user';
-    } catch (_) {
-      // Revoked device, disabled account, or a password change elsewhere.
-    }
-  }
+  if (await _refreshFromDevice()) return 'user';
 
   clearTokens();
   setAuth(null);
   setState({ authMode: 'none', user: null });
   return 'none';
+}
+
+/** Exchange the remembered-device token for a session. */
+async function _refreshFromDevice() {
+  const deviceToken = loadDeviceToken();
+  if (!deviceToken) return false;
+  try {
+    const refreshed = await api.refreshSession(deviceToken);
+    storeTokens({ sessionToken: refreshed.sessionToken, deviceToken });
+    writeJson(CACHE_KEYS.user, refreshed.user);
+    setAuth({ type: 'token', token: refreshed.sessionToken });
+    setState({ authMode: 'user', user: refreshed.user });
+    return true;
+  } catch (_) {
+    // Revoked device, disabled account, or a password change elsewhere.
+    return false;
+  }
+}
+
+/**
+ * Confirm the session the app has already started using, and correct course if
+ * it turns out to be dead.
+ */
+async function _verifyInBackground() {
+  try {
+    const me = await api.me();
+    writeJson(CACHE_KEYS.user, me.user);
+    // Role or name may have changed since this device last looked.
+    setState({ user: me.user });
+    return;
+  } catch (_) {
+    // Session gone. A remembered device can still produce a new one.
+  }
+
+  if (await _refreshFromDevice()) return;
+
+  clearTokens();
+  setAuth(null);
+  setState({
+    authMode: 'none',
+    user: null,
+    authError: 'Your session has ended. Please sign in again.',
+  });
+  navigate('/login', true);
 }
 
 export async function signOut() {

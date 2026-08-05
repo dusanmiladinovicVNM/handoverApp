@@ -31,6 +31,7 @@ import {
   inspectionProgress, findAllMissingRequired
 } from './validator.js';
 import { AUTOSAVE_DEBOUNCE_MS } from './config.js';
+import { readJson, writeJson, CACHE_KEYS } from './utils/store.js';
 import {
   login as authLogin, setPassword as authSetPassword,
   signOut as authSignOut, suggestDeviceLabel,
@@ -937,19 +938,20 @@ function humanEvent(type) {
 // ============================================================
 
 /**
- * The last list the server sent, kept across visits to this page.
+ * The last list the server sent, kept on the device.
  *
  * This is the screen everything returns to, and re-fetching it on every arrival
- * meant a two-to-four second wait to look at rows that were already on screen a
- * moment earlier. The list is shown immediately from here and refreshed in the
- * background, so it is current within a couple of seconds without ever being
- * blank in the meantime.
+ * meant a two-to-four second wait to look at rows that were on screen a moment
+ * earlier. Held in localStorage rather than in memory so that it survives
+ * closing the app — which is when the wait was most obvious, since a cold start
+ * had nothing to show at all.
+ *
+ * Cleared on sign-out along with the other caches; see utils/store.js.
  */
-let _lastInspectionList = null;
-
 export function pageAdminList() {
-  let inspections = _lastInspectionList || [];
-  let loading = !_lastInspectionList;
+  const remembered = readJson(CACHE_KEYS.inspectionList);
+  let inspections = remembered || [];
+  let loading = !remembered;
   let error = null;
   let filter = { status: [], search: '' };
 
@@ -960,7 +962,11 @@ export function pageAdminList() {
     try {
       const res = await api.listInspections(filter, 0, 100, 'updatedAt', 'desc');
       inspections = res.inspections || [];
-      _lastInspectionList = inspections;
+      // Only the unfiltered list is worth remembering: a filtered one would
+      // reopen looking like the whole set while showing a subset.
+      if (!filter.search && (!filter.status || filter.status.length === 0)) {
+        writeJson(CACHE_KEYS.inspectionList, inspections);
+      }
       error = null;
     } catch (e) {
       // A failed refresh must not wipe a list that is already readable.

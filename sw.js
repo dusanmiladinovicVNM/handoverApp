@@ -21,7 +21,7 @@
  * Regenerate by running `node tests/run.js`; the shell-cache check prints the
  * value to paste in when it no longer matches.
  */
-const SHELL_HASH = '775878f33492';
+const SHELL_HASH = '7edf16ca2106';
 const CACHE_VERSION = `handover-${SHELL_HASH}`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
@@ -45,6 +45,7 @@ const APP_SHELL = [
   './js/components.js',
   './js/pages.js',
   './js/utils/dom.js',
+  './js/utils/store.js',
   './js/utils/image.js',
   './js/utils/format.js',
 ];
