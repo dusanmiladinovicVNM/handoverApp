@@ -1,0 +1,4 @@
+# clasp points at one specific Apps Script deployment — not shared.
+.clasp.json
+
+node_modules/

@@ -87,6 +87,34 @@ module.exports = function run() {
     }
   });
 
+  section('File names match what is in them:');
+
+  // Apps Script does not care what a file is called — only the declarations
+  // matter — so a name that has drifted from its content breaks nothing on its
+  // own. It does something worse: it makes a copy go quietly wrong. Paste into
+  // the file you thought you were in, and one service is duplicated while
+  // another is destroyed, and the only symptom is an error naming a file that
+  // has nothing to do with the call.
+  //
+  // Keeping the two aligned here means a mismatch in the editor is visible at a
+  // glance rather than only after something breaks.
+  check('every service file is named after the service it declares', () => {
+    // Entry points and script-level helpers declare no service of their own.
+    const EXEMPT = { 'Code.gs': 'entry point', 'BootstrapService.gs': 'functions only' };
+
+    const wrong = [];
+    for (const file of files) {
+      if (EXEMPT[file]) continue;
+      const source = fs.readFileSync(path.join(GAS_DIR, file), 'utf8');
+      const declared = [...source.matchAll(/^const (\w+) = /gm)].map(m => m[1]);
+      const expected = file.replace(/\.gs$/, '');
+      if (declared.indexOf(expected) < 0) {
+        wrong.push(`${file} declares ${declared.join(', ') || 'nothing'}`);
+      }
+    }
+    assert(wrong.length === 0, wrong.join('; '));
+  });
+
   section('Routing table:');
 
   const globals = buildLoadTimeGlobals();

@@ -23,7 +23,7 @@ nemaju naloge i ne treba da ih imaju.
 
 ## 2. Zašto je ovo potrebno
 
-Trenutno stanje (`gas/Authservice.gs`) nema pojam osobe. Postoji samo uloga
+Trenutno stanje (`gas/AuthService.gs`) nema pojam osobe. Postoji samo uloga
 `admin` i lista nonce-ova u Script Properties.
 
 | Pitanje | Trenutni odgovor |
@@ -420,7 +420,7 @@ admin vidi sve
 ### Tačke u kodu koje se menjaju
 
 Postojeći `requireMatchingInspection` ograničava **samo** stanare
-(`Authservice.gs:195` — uslov je `authCtx.role === 'tenant'`). Uvodi se
+(`AuthService.gs:195` — uslov je `authCtx.role === 'tenant'`). Uvodi se
 `requireInspectionAccess(authCtx, inspectionId)` koji pokriva sve tri uloge, i
 zamenjuje postojeći poziv na ovim mestima:
 
@@ -632,7 +632,7 @@ ekrana usred radnog dana.
 | Lozinke i PBKDF2 | `gas/PasswordService.gs` (novo) | 160 |
 | Uređaji | `gas/DeviceService.gs` (novo) | 120 |
 | Mejlovi | `gas/MailService.gs` (novo) | 90 |
-| Izmene autentikacije | `gas/Authservice.gs` | 150 |
+| Izmene autentikacije | `gas/AuthService.gs` | 150 |
 | Vidljivost inspekcija | `InspectionService`, `AttachmentService`, `SignatureService` | 90 |
 | Javne akcije | `gas/Code.gs` | 15 |
 | Rute | `gas/Router.gs` | 16 |

@@ -190,7 +190,7 @@ function createEnvironment(overrides, options) {
   // under test — Router.gs proves that by resolving its services lazily.
   const sources = [
     'Utils.gs', 'PasswordService.gs', 'UserService.gs', 'DeviceService.gs',
-    'MailService.gs', 'AuditService.gs', 'Authservice.gs', 'AccountService.gs',
+    'MailService.gs', 'AuditService.gs', 'AuthService.gs', 'AccountService.gs',
     'UserAdminService.gs',
   ];
   const code = sources
