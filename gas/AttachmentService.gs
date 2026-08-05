@@ -12,7 +12,7 @@ const AttachmentService = (function () {
     Utils.requireField(data, 'fileName', 'string');
     Utils.requireField(data, 'mimeType', 'string');
     Utils.requireField(data, 'base64Data', 'string');
-    AuthService.requireMatchingInspection(authCtx, data.inspectionId);
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
 
     const inspection = SheetService.getInspection(data.inspectionId);
     if (!inspection) throw new HandoverError('NOT_FOUND', 'Inspection not found.');
@@ -109,6 +109,7 @@ const AttachmentService = (function () {
     AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionId', 'string');
     Utils.requireField(data, 'attachmentId', 'string');
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
 
     const att = SheetService.getAttachment(data.attachmentId);
     if (!att) throw new HandoverError('NOT_FOUND', 'Attachment not found.');

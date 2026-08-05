@@ -294,8 +294,8 @@ const AuthService = (function () {
    * What stays admin-only is supervisory: reopening a signed inspection,
    * reading the audit log, and managing accounts.
    *
-   * This says nothing about *which* inspections. That is phase 3, where
-   * assignedTo starts narrowing the list.
+   * This says nothing about *which* inspections — requireInspectionAccess does,
+   * and every handler that names an inspection has to call it too.
    */
   function requireStaff(authCtx) {
     if (!authCtx || authCtx.role === 'tenant') {
@@ -307,6 +307,66 @@ const AuthService = (function () {
     if (authCtx.role === 'tenant' && authCtx.inspectionId !== inspectionId) {
       throw new HandoverError('FORBIDDEN', 'Token not valid for this inspection.');
     }
+  }
+
+  /**
+   * May this caller touch this particular inspection?
+   *
+   * Three answers, one per kind of caller:
+   *
+   *   tenant     only the inspection its link was issued for
+   *   admin      any of them
+   *   inspector  only the ones assigned to them
+   *
+   * An inspector is told 'not found' rather than 'not yours', and gets the same
+   * answer for an inspection that does not exist. Inspection ids run in
+   * sequence, so a FORBIDDEN would let anyone with an account walk the range
+   * and count the work — which is exactly what "an inspector sees only their
+   * own" is meant to prevent.
+   *
+   * The row is fetched here even though most callers fetch it again straight
+   * afterwards. Within one execution SheetService has already read the sheet,
+   * so the second call is free, and the alternative — passing the row in — puts
+   * the caller in charge of what the check looks at.
+   */
+  function requireInspectionAccess(authCtx, inspectionId) {
+    if (!authCtx) {
+      throw new HandoverError('UNAUTHORIZED', 'Not signed in.');
+    }
+
+    if (authCtx.role === 'tenant') {
+      requireMatchingInspection(authCtx, inspectionId);
+      return;
+    }
+    if (authCtx.isAdmin) return;
+
+    const inspection = SheetService.getInspection(inspectionId);
+    const owner = String((inspection && inspection.assignedTo) || '').trim().toLowerCase();
+    const caller = String(authCtx.email || '').trim().toLowerCase();
+
+    // An unassigned inspection has no owner to match, so it stays with the
+    // admins until someone hands it over.
+    if (!owner || !caller || owner !== caller) {
+      throw new HandoverError('NOT_FOUND', 'Inspection not found.');
+    }
+  }
+
+  /**
+   * Narrow a list of inspection rows to what this caller may see. Same rule as
+   * requireInspectionAccess, applied in bulk.
+   *
+   * Kept here rather than expressed as a filter argument to SheetService,
+   * because the filter object on a list request comes from the client. A
+   * restriction the client can name is a restriction the client can drop.
+   */
+  function visibleInspections(authCtx, rows) {
+    if (!authCtx) return [];
+    if (authCtx.isAdmin) return rows;
+
+    const caller = String(authCtx.email || '').trim().toLowerCase();
+    if (!caller) return [];
+    return rows.filter(
+      r => String(r.assignedTo || '').trim().toLowerCase() === caller);
   }
 
   function requireMatchingRole(authCtx, signerRole) {
@@ -333,6 +393,8 @@ const AuthService = (function () {
     requireAdmin,
     requireStaff,
     requireMatchingInspection,
+    requireInspectionAccess,
+    visibleInspections,
     requireMatchingRole,
   };
 })();

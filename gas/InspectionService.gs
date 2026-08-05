@@ -66,9 +66,13 @@ const InspectionService = (function () {
       signedAt: '',
       // Who the inspection is *for*, which is not always who typed it in. The
       // office commonly opens the job and an inspector goes out to do it, so
-      // ownership cannot be inferred from createdBy — see phase 3, where this
-      // column starts governing what an inspector may see.
-      assignedTo: UserService.normalizeEmail(data.assignedTo) || authCtx.email || '',
+      // ownership cannot be inferred from createdBy. This column now governs
+      // what an inspector may see, which is why only an admin may point it at
+      // someone else: an inspector naming another owner would be handing away
+      // the inspection it had just created, and could not get it back.
+      assignedTo: (authCtx.isAdmin
+        ? UserService.normalizeEmail(data.assignedTo)
+        : '') || authCtx.email || '',
     };
 
     SheetService.createInspection(inspection);
@@ -93,7 +97,7 @@ const InspectionService = (function () {
 
   function getInspection(authCtx, data) {
     Utils.requireField(data, 'inspectionId', 'string');
-    AuthService.requireMatchingInspection(authCtx, data.inspectionId);
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
 
     const inspection = SheetService.getInspection(data.inspectionId);
     if (!inspection) throw new HandoverError('NOT_FOUND', 'Inspection not found.');
@@ -168,7 +172,7 @@ const InspectionService = (function () {
     Utils.requireField(data, 'inspectionId', 'string');
     Utils.requireField(data, 'sectionId', 'string');
     Utils.requireField(data, 'items', 'object');
-    AuthService.requireMatchingInspection(authCtx, data.inspectionId);
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
 
     const inspection = SheetService.getInspection(data.inspectionId);
     if (!inspection) throw new HandoverError('NOT_FOUND', 'Inspection not found.');
@@ -246,6 +250,7 @@ const InspectionService = (function () {
   function lockInspection(authCtx, data) {
     AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionId', 'string');
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
 
     const inspection = SheetService.getInspection(data.inspectionId);
     if (!inspection) throw new HandoverError('NOT_FOUND', 'Inspection not found.');
@@ -310,6 +315,7 @@ const InspectionService = (function () {
   function regenerateTenantToken(authCtx, data) {
     AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionId', 'string');
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
 
     const inspection = SheetService.getInspection(data.inspectionId);
     if (!inspection) throw new HandoverError('NOT_FOUND', 'Inspection not found.');
@@ -340,7 +346,12 @@ const InspectionService = (function () {
   function listInspections(authCtx, data) {
     AuthService.requireStaff(authCtx);
     const filter = (data && data.filter) || {};
-    const all = SheetService.listInspections(filter);
+    // Narrowed after the sheet, not through it: the filter object above comes
+    // from the client, and a restriction sent by the client is one the client
+    // can leave out. totalCount and the paging below then count what this
+    // caller can actually see.
+    const all = AuthService.visibleInspections(
+      authCtx, SheetService.listInspections(filter));
 
     const sortBy = (data && data.sortBy) || 'updatedAt';
     const sortOrder = (data && data.sortOrder) || 'desc';

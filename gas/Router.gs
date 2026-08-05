@@ -41,8 +41,11 @@ const Router = (function () {
     'assignInspection': (authCtx, data) => UserAdminService.assignInspection(authCtx, data),
 
     // --- Schemas ---
+    // Staff, not admin. This was admin-only from before inspectors existed,
+    // which left the New Inspection form unable to load its list of forms for
+    // exactly the role that goes out and fills them in.
     'getSchemas': (authCtx, data) => {
-      AuthService.requireAdmin(authCtx);
+      AuthService.requireStaff(authCtx);
       return { schemas: SchemaService.listActiveSchemas() };
     },
     // Staff only. It used to accept any valid token, which let a tenant link

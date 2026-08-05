@@ -12,7 +12,7 @@ const SignatureService = (function () {
     Utils.requireField(data, 'accepted', 'boolean');
     Utils.requireField(data, 'base64Png', 'string');
 
-    AuthService.requireMatchingInspection(authCtx, data.inspectionId);
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
     AuthService.requireMatchingRole(authCtx, data.signerRole);
 
     if (!data.accepted) {

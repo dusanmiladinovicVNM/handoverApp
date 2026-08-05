@@ -74,3 +74,23 @@ not covered — those need the real platform.
 The manual scenarios in `docs/user-administration-proposal.md`, section 15,
 remain the acceptance check. Numbers 1 through 11 are automated here; the rest
 need a browser and a deployment.
+
+## visibility.test.js
+
+Which inspections an inspector may see and touch.
+
+Most of it is ordinary: an admin sees everything, an inspector sees what is
+assigned to them, a tenant link still reaches only its own inspection. Two
+parts are worth knowing about before changing them.
+
+The first section reads the `.gs` sources rather than calling anything. The
+failure it guards against is an omission — a handler that takes an
+`inspectionId` and never asks who is calling — and a check that is never made
+cannot be caught by making it. Adding a handler that names an inspection means
+adding a line to that list.
+
+The refusal test asserts that an inspector gets the *same* answer for someone
+else's inspection and for one that does not exist. Inspection ids run in
+sequence, so a distinguishable `FORBIDDEN` would let any account walk the range
+and count the firm's work. If that test fails after a change to error handling,
+the fix is the error, not the test.

@@ -20,6 +20,7 @@ const PdfService = (function () {
   function finalizeInspection(authCtx, data) {
     AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionId', 'string');
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
 
     const inspection = SheetService.getInspection(data.inspectionId);
     if (!inspection) throw new HandoverError('NOT_FOUND', 'Inspection not found.');
