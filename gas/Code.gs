@@ -44,14 +44,27 @@ function doPost(e) {
     }
 
     // Resolve auth before dispatch, except for the sign-in actions themselves
+    const startedAt = Date.now();
     const isPublic = PUBLIC_ACTIONS.indexOf(action) >= 0;
     const authCtx = isPublic ? null : AuthService.resolveAuth(body.auth);
-
-    Utils.log('INFO', 'API call', {
-      action, actor: authCtx ? authCtx.actorString : 'anonymous',
-    });
+    const authMs = Date.now() - startedAt;
 
     const result = Router.dispatch(action, authCtx, body.data);
+
+    // Timed and split so that "the app feels slow" can be answered with numbers.
+    // Auth runs on every single request and reads two rows behind a cache, so
+    // it is worth knowing separately from whatever the action itself does —
+    // otherwise the obvious suspect and the real one look identical from here.
+    // Visible under Executions in the editor.
+    const totalMs = Date.now() - startedAt;
+    Utils.log('INFO', 'API call', {
+      action: action,
+      actor: authCtx ? authCtx.actorString : 'anonymous',
+      authMs: authMs,
+      handlerMs: totalMs - authMs,
+      totalMs: totalMs,
+    });
+
     return ResponseService.success(result);
 
   } catch (e) {
