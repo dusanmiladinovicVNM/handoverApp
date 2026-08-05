@@ -57,7 +57,7 @@ function _seedMissingConfigKeys(ss) {
     ['setPasswordTtlHours', '48', 'How long a set-password link stays valid'],
     ['loginMaxFailures', '5', 'Failed sign-ins before an account locks'],
     ['loginLockMinutes', '15', 'How long an account stays locked'],
-    ['authCacheTtlSeconds', '60', 'How long a cached user or device row is trusted'],
+    ['authCacheTtlSeconds', '1800', 'How long a cached user or device row is trusted; revocation through the app is immediate regardless'],
     ['slowRequestMs', '5000', 'Requests slower than this record their timing in AuditLog; 0 logs all'],
   ];
 

@@ -165,9 +165,26 @@ const Config = (function () {
     return getNumber('loginLockMinutes', 15);
   }
 
-  /** How long a cached Users/Devices row stays valid, in seconds. */
+  /**
+   * How long a cached Users/Devices row stays valid, in seconds.
+   *
+   * Thirty minutes, not the sixty seconds this started at. The short window was
+   * guarding against something the code already handles: every path that
+   * disables an account, changes a role or revokes a device goes through
+   * UserService.update or DeviceService.revoke, and both drop the cached entry
+   * on the spot. Revocation through the app is immediate at any TTL.
+   *
+   * What the window actually bounds is a change made by editing the spreadsheet
+   * by hand, which then takes up to this long to be noticed. That is a good
+   * reason to disable an account through the screen rather than the sheet, and
+   * a poor reason to make every request pay for a sheet read.
+   *
+   * It is worth paying for: resolving a session is the first thing to touch
+   * Sheets in any request, so it was auth that paid to open the workbook —
+   * measured at 4.9 s on a request whose own work took 123 ms.
+   */
   function getAuthCacheTtlSeconds() {
-    return getNumber('authCacheTtlSeconds', 60);
+    return getNumber('authCacheTtlSeconds', 1800);
   }
 
   /**
