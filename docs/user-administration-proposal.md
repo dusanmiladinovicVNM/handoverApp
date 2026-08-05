@@ -541,6 +541,27 @@ za fazu 2, zajedno sa celim frontendom.
 
 Postupak puštanja u rad, redom:
 
+0. **Dozvola za slanje mejla.** U editoru: ⚙ *Project Settings* → uključiti
+   *Show "appsscript.json" manifest file in editor*, pa u `oauthScopes` dodati
+
+   ```
+   "https://www.googleapis.com/auth/script.send_mail"
+   ```
+
+   Ceo spisak koji ovaj backend koristi:
+
+   | Scope | Zašto |
+   |---|---|
+   | `.../auth/spreadsheets` | `SpreadsheetApp` — radna sveska |
+   | `.../auth/drive` | `DriveApp` — folderi, prilozi, kopija šablona |
+   | `.../auth/documents` | `DocumentApp` — generisanje PDF-a |
+   | `.../auth/script.send_mail` | `MailApp` — linkovi za lozinku |
+
+   Posle izmene pokrenuti bilo koju funkciju i **prihvatiti novu autorizaciju**.
+   Ako `oauthScopes` uopšte ne postoji u manifestu, Apps Script sam prepoznaje
+   potrebne dozvole — ali ako spisak postoji, drži se njega i `MailApp` puca sa
+   `Specified permissions are not sufficient`. Ne dirati `timeZone`.
+
 1. `bootstrapSheet()` — pravi listove `Users` i `Devices`, dodaje kolonu
    `assignedTo` i upisuje nove ključeve u `Config`
 2. `migrateAssignedTo()` — popunjava `assignedTo` na postojećim inspekcijama

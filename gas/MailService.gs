@@ -8,6 +8,10 @@
  * chooses their own. There is therefore no window in which an account has a
  * password that the sender also knows.
  *
+ * Sending needs the OAuth scope https://www.googleapis.com/auth/script.send_mail.
+ * If the project pins its scopes in appsscript.json, that entry has to be added
+ * by hand and the script re-authorised — Apps Script will not infer it.
+ *
  * Quota note: MailApp allows 100 recipients a day on consumer Gmail accounts
  * and 1500 on Workspace. Mail leaves from the script owner's address, so check
  * the first delivery does not land in spam.
@@ -66,10 +70,17 @@ const MailService = (function () {
       Utils.log('ERROR', 'Set-password mail failed', {
         userId: user.userId, error: e.message,
       });
+      // The two causes look nothing alike to whoever has to fix them, so the
+      // message says which one it is instead of guessing.
+      const missingScope = /permission|scope|authoriz|authoris/i.test(e.message || '');
       throw new HandoverError(
         'INTERNAL_ERROR',
-        'The account was saved but the email could not be sent. ' +
-        'Check the MailApp quota, then send the link again.'
+        missingScope
+          ? 'The account was saved but email is not authorised. Add the scope ' +
+            'https://www.googleapis.com/auth/script.send_mail to appsscript.json, ' +
+            're-authorise the script, then send the link again.'
+          : 'The account was saved but the email could not be sent. ' +
+            'Check the MailApp quota, then send the link again.'
       );
     }
   }

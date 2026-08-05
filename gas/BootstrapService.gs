@@ -400,12 +400,28 @@ function bootstrapFirstAdmin(email, name) {
   }
 
   const token = AuthService.generateSetPasswordToken(user);
-  MailService.sendSetPasswordLink(user, token, PasswordService.hasPassword(user));
   AuditService.logAuth('bootstrap', 'user_created', { userId: user.userId, role: 'admin' });
 
-  Logger.log(`Set-password link sent to ${normalized}, valid for ${Config.getSetPasswordTtlHours()}h.`);
-  Logger.log('If mail does not arrive, the link is also printed below:');
+  // Printed before the mail is attempted, and deliberately so. This function is
+  // the way back in when nothing else works, and mail is the part of it most
+  // likely to fail — a missing scope, a spent quota, a message in spam. Sending
+  // first would mean a failure leaves an account created and its only link
+  // discarded, which is the exact situation this function exists to prevent.
+  Logger.log('=========================================');
+  Logger.log('SET-PASSWORD LINK — open it to choose your password');
+  Logger.log(`Valid for ${Config.getSetPasswordTtlHours()} hours, single use.`);
+  Logger.log('-----------------------------------------');
   Logger.log(`${Config.getFrontendUrl()}#/set-password?k=${token}`);
+  Logger.log('-----------------------------------------');
+
+  try {
+    MailService.sendSetPasswordLink(user, token, PasswordService.hasPassword(user));
+    Logger.log(`Also emailed to ${normalized}.`);
+  } catch (e) {
+    Logger.log(`Email could not be sent: ${e.message}`);
+    Logger.log('Use the link above — the account is created and the link works.');
+  }
+  Logger.log('=========================================');
 }
 
 /**
