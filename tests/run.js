@@ -14,6 +14,7 @@ const suites = [
   ['Service worker cache', require('./shell-cache.test')],
   ['Sheet reads and cache', require('./sheet-cache.test')],
   ['Schema cache', require('./schema-cache.test')],
+  ['Drive folders', require('./drive-folders.test')],
   ['Passwords', require('./password.test')],
   ['Tokens and authorization', require('./auth.test')],
   ['Auth mirror', require('./auth-mirror.test')],

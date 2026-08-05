@@ -94,3 +94,22 @@ else's inspection and for one that does not exist. Inspection ids run in
 sequence, so a distinguishable `FORBIDDEN` would let any account walk the range
 and count the firm's work. If that test fails after a change to error handling,
 the fix is the error, not the test.
+
+## drive-folders.test.js
+
+The real `DriveService` over a fake Drive that counts round trips.
+
+Drive is the other remote service on the request path, and it was the more
+expensive one: creating an inspection made seven calls to Drive against three
+to the spreadsheet, and every photo upload walked from the root down to
+rediscover a folder id the inspection row already stored.
+
+Cutting round trips on a filing system either works or quietly puts files
+somewhere else, so every count assertion is paired with one about the resulting
+folder's full path. If a count assertion fails after a deliberate change, update
+the number — but never delete the path assertion beside it.
+
+`secondRequest()` builds an installation in one execution and then loads the
+service again against the same fake Drive and the same Script Properties. That
+is what a later request sees: the remembered ids survive, the per-execution
+caches do not.
