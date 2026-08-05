@@ -498,7 +498,7 @@ export function signatureCanvas() {
     ctx.scale(dpr, dpr);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#1c2530';
+    ctx.strokeStyle = '#111111';
     ctx.lineWidth = 2.5;
     isSetUp = true;
     return true;
@@ -529,7 +529,7 @@ export function signatureCanvas() {
     const ctx = canvas.getContext('2d');
     ctx.beginPath();
     ctx.arc(lastPoint.x, lastPoint.y, 1.25, 0, Math.PI * 2);
-    ctx.fillStyle = '#1c2530';
+    ctx.fillStyle = '#111111';
     ctx.fill();
   }
 
@@ -579,7 +579,7 @@ export function signatureCanvas() {
       ctx.scale(dpr, dpr);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.strokeStyle = '#1c2530';
+      ctx.strokeStyle = '#111111';
       ctx.lineWidth = 2.5;
       hasDrawn = false;
       hint.style.display = '';
