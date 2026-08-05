@@ -193,6 +193,27 @@ Pošto se prijava dešava jednom u 12 sati, odnosno jednom u 60 dana na zapamće
 uređaju, budžet od 1 sekunde je bio nepotrebno strog. Uzeto je **2,5 sekunde**,
 što daje **1.000 iteracija** — vrednost koja ide u `Config` pod `pbkdf2Iterations`.
 
+### Ispravka: i to merenje je bilo pogrešno
+
+Kasnije merenje u `smokeTest`, pri vrednosti od 1.000 iteracija, pokazalo je
+**1,9 s za tri izvođenja** — dakle ~0,63 s po izvođenju, odnosno **0,63 ms po
+iteraciji**. Četiri puta jeftinije nego što je benchmark rekao.
+
+Uzrok je bio u samom benchmarku: merio je **hladan prolaz**. Prvo izvršavanje
+meri kako se izvršno okruženje zagreva, ne koliko posao košta. Funkcija sada
+radi jedan prolaz pre merenja.
+
+Posledica nije akademska. Preporuka je zbog toga ispala **četiri puta preniska**,
+a niža vrednost ne košta ništa u udobnosti — samo daje napadaču srazmeran
+popust. Pri 1.000 tamo gde staje 4.000, tri četvrtine zaštite koja je bila na
+raspolaganju jednostavno se ne koristi.
+
+**Pokrenuti `benchmarkPbkdf2()` ponovo i upisati ono što ispiše.** Očekuje se red
+veličine 4.000.
+
+Vredi zabeležiti i kao obrazac: merenje je u ovom projektu tri puta ispravilo
+procenu, a ovog puta je ispravilo i prethodno merenje.
+
 ### Šta ovo jeste, a šta nije — bez ulepšavanja
 
 Ovde je važno ne prevariti se sopstvenim brojkama. Onih 2,5 ms po iteraciji

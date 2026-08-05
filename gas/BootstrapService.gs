@@ -662,6 +662,16 @@ function benchmarkPbkdf2() {
   // here every millisecond spent is one the work factor gets.
   const budgetMs = 2500;
 
+  // Warm up before timing anything.
+  //
+  // The first version of this function measured 2.5 ms per iteration and was
+  // wrong by a factor of four: the real cost in a warm execution is nearer
+  // 0.6 ms. Everything after that inherited the error — the recommended
+  // iteration count came out four times too low, which is four times less work
+  // for anyone attacking a stolen hash. A cold first pass measures the runtime
+  // warming up, not the work.
+  PasswordService._pbkdf2Sha256(password, salt, 500);
+
   Logger.log('Measuring PBKDF2-HMAC-SHA256 …');
 
   let slowestPerIteration = 0;
@@ -688,6 +698,11 @@ function benchmarkPbkdf2() {
   Logger.log('native code does not pay — so each iteration buys far less than the');
   Logger.log('milliseconds suggest. A few thousand iterations here is nowhere near');
   Logger.log('what bcrypt or Argon2 would give on an ordinary server.');
+  Logger.log('');
+  Logger.log('But do raise the setting to what this prints. Leaving it below the');
+  Logger.log('measurement costs nothing in comfort and hands the attacker a');
+  Logger.log('proportional discount — at 1000 where 4000 fits, three quarters of');
+  Logger.log('the protection that was available is simply not being used.');
   Logger.log('');
   Logger.log('What that means in practice:');
   Logger.log('  · password LENGTH is what actually protects these accounts —');
