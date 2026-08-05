@@ -936,20 +936,36 @@ function humanEvent(type) {
 // pageAdminList
 // ============================================================
 
+/**
+ * The last list the server sent, kept across visits to this page.
+ *
+ * This is the screen everything returns to, and re-fetching it on every arrival
+ * meant a two-to-four second wait to look at rows that were already on screen a
+ * moment earlier. The list is shown immediately from here and refreshed in the
+ * background, so it is current within a couple of seconds without ever being
+ * blank in the meantime.
+ */
+let _lastInspectionList = null;
+
 export function pageAdminList() {
-  let inspections = [];
-  let loading = true;
+  let inspections = _lastInspectionList || [];
+  let loading = !_lastInspectionList;
   let error = null;
   let filter = { status: [], search: '' };
 
   async function load() {
-    loading = true; render();
+    // Only show the spinner when there is nothing to show instead. Replacing a
+    // usable list with a spinner is a step backwards, however briefly.
+    if (inspections.length === 0) { loading = true; render(); }
     try {
       const res = await api.listInspections(filter, 0, 100, 'updatedAt', 'desc');
       inspections = res.inspections || [];
+      _lastInspectionList = inspections;
       error = null;
     } catch (e) {
-      error = e.message;
+      // A failed refresh must not wipe a list that is already readable.
+      if (inspections.length === 0) error = e.message;
+      else toastWarning('Could not refresh the list.');
     } finally {
       loading = false;
       render();
@@ -1292,12 +1308,23 @@ export function pageAdminNew() {
 
 export async function pageInspectionHome({ params }) {
   const inspectionId = params.id;
-  showSpinner('Loading inspection…');
-  try {
-    const data = await api.getInspection(inspectionId);
-    setInspectionData(data);
-  } catch (e) {
-    return showError('Could not load inspection', e.message);
+
+  // Reuse what is already loaded, as pageInspectionSection has always done.
+  // Without this, walking list → inspection → section → back → back costs a
+  // round trip at every step, and a round trip here is two to four seconds —
+  // so the app spends most of its time re-fetching what it just had.
+  //
+  // Safe because the pages that change an inspection refresh it themselves:
+  // saving, locking, unlocking, signing and finalising all call
+  // setInspectionData with the server's reply.
+  if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
+    showSpinner('Loading inspection…');
+    try {
+      const data = await api.getInspection(inspectionId);
+      setInspectionData(data);
+    } catch (e) {
+      return showError('Could not load inspection', e.message);
+    }
   }
 
   function render() {
@@ -2195,12 +2222,18 @@ function openAssign(inspectionId, currentEmail) {
 
 export async function pageAdminDetail({ params }) {
   const inspectionId = params.id;
-  showSpinner('Loading…');
-  try {
-    const data = await api.getInspection(inspectionId);
-    setInspectionData(data);
-  } catch (e) {
-    return showError('Could not load inspection', e.message);
+
+  // Same reuse as pageInspectionHome. This page is most often reached from the
+  // list and left again immediately, which is exactly the pattern that made
+  // every click cost a fetch.
+  if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
+    showSpinner('Loading…');
+    try {
+      const data = await api.getInspection(inspectionId);
+      setInspectionData(data);
+    } catch (e) {
+      return showError('Could not load inspection', e.message);
+    }
   }
 
   function render() {
