@@ -282,6 +282,17 @@ function smokeTest() {
   });
 
   Logger.log(checks.join('\n'));
+
+  // Printed rather than asserted: no check here can tell a working address from
+  // a plausible one, and this single value builds both the tenant links and the
+  // set-password links. A wrong case in it fails silently, at the far end.
+  Logger.log('');
+  try {
+    Logger.log(`FRONTEND_URL: ${Config.getFrontendUrl()}`);
+    Logger.log('Open it. If it 404s, every link this backend sends out is dead.');
+  } catch (e) {
+    Logger.log(`FRONTEND_URL: not configured — ${e.message}`);
+  }
 }
 
 
@@ -353,6 +364,54 @@ function setupFirstAdmin() {
 }
 
 /**
+ * ⇩⇩⇩  SET A PASSWORD WITHOUT A BROWSER  ⇩⇩⇩
+ *
+ * The set-password screen is frontend work and does not exist yet, so the
+ * mailed link has nowhere to land until it does. This does the same job from
+ * the editor: edit the two lines, select "setMyPassword" in the dropdown, Run.
+ *
+ * It goes through AccountService.setPassword rather than writing a hash
+ * directly, so the policy check, the device revocation and the audit entry all
+ * happen exactly as they will for a real user. Nothing here is a shortcut
+ * around the rules.
+ *
+ * Afterwards, clear PASSWORD below and save. A password typed into a source
+ * file stays in the editor's revision history otherwise.
+ */
+function setMyPassword() {
+  const EMAIL    = 'promeni.me@primer.rs';   // ← your email address
+  const PASSWORD = '';                       // ← at least 16 characters, then clear this
+
+  if (EMAIL === 'promeni.me@primer.rs' || !PASSWORD) {
+    Logger.log('Edit EMAIL and PASSWORD at the top of setMyPassword() first.');
+    Logger.log(`Minimum length is ${Config.getPasswordMinLength()} characters —`);
+    Logger.log('a phrase of four unrelated words is the shape to aim for.');
+    return;
+  }
+
+  const user = UserService.getByEmail(EMAIL);
+  if (!user) {
+    Logger.log(`No account for ${EMAIL}. Run setupFirstAdmin() first.`);
+    return;
+  }
+
+  try {
+    AccountService.setPassword(null, {
+      token: AuthService.generateSetPasswordToken(user),
+      password: PASSWORD,
+      deviceLabel: 'Apps Script editor',
+    });
+  } catch (e) {
+    Logger.log(`Rejected: ${e.message}`);
+    return;
+  }
+
+  Logger.log(`Password set for ${EMAIL}. Now clear the PASSWORD line above and save.`);
+  Logger.log('Any device that was signed in has been signed out, as it would be');
+  Logger.log('for any password change.');
+}
+
+/**
  * Create the very first administrator, or repair access when nobody can get in.
  *
  * Takes arguments, so it is callable from other code and from the editor's
@@ -408,10 +467,19 @@ function bootstrapFirstAdmin(email, name) {
   // first would mean a failure leaves an account created and its only link
   // discarded, which is the exact situation this function exists to prevent.
   Logger.log('=========================================');
-  Logger.log('SET-PASSWORD LINK — open it to choose your password');
+  Logger.log('SET-PASSWORD LINK');
   Logger.log(`Valid for ${Config.getSetPasswordTtlHours()} hours, single use.`);
   Logger.log('-----------------------------------------');
   Logger.log(`${Config.getFrontendUrl()}#/set-password?k=${token}`);
+  Logger.log('-----------------------------------------');
+  Logger.log('NOTE: the screen this link opens is frontend work and does not');
+  Logger.log('exist yet. Until it does, set the password from the editor with');
+  Logger.log('setMyPassword(). Keep the link only if the screen is already live.');
+  Logger.log('');
+  Logger.log(`Frontend URL in use: ${Config.getFrontendUrl()}`);
+  Logger.log('Check that against the address that actually serves the app —');
+  Logger.log('GitHub Pages project paths are case-sensitive, and the same');
+  Logger.log('setting also builds the links sent to tenants.');
   Logger.log('-----------------------------------------');
 
   try {
