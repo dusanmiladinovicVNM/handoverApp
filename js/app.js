@@ -88,7 +88,12 @@ function registerRoutes() {
 
   Router.route('/inspection/:id', pageInspectionHome);
   Router.route('/inspection/:id/section/:sectionId', pageInspectionSection);
-  Router.route('/inspection/:id/review', requireAdmin(pageReview));
+  // Staff, not admin. Locking for signature is the end of fieldwork, so gating
+  // it on admin left an inspector able to fill an inspection in and not able to
+  // finish it. The server asks the same question the other way round:
+  // lockInspection is requireStaff plus requireInspectionAccess, so an
+  // inspector can only lock what is theirs.
+  Router.route('/inspection/:id/review', requireUser(pageReview));
   Router.route('/inspection/:id/sign', pageSign);
   Router.route('/inspection/:id/success', pageSuccess);
 

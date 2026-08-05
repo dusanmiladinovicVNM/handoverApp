@@ -2282,7 +2282,11 @@ export async function pageAdminDetail({ params }) {
     const progress = inspectionProgress(state.schema, state.answers);
 
     const canEdit = ['draft', 'under_review'].indexOf(i.status) >= 0;
-    const canUnlock = ['locked_for_signature', 'partially_signed'].indexOf(i.status) >= 0;
+    // Reopening a signed inspection is supervisory, so unlockInspection is one
+    // of the few things that stayed admin-only. Showing the button to an
+    // inspector would only produce a refusal they can do nothing about.
+    const canUnlock = isAdmin()
+      && ['locked_for_signature', 'partially_signed'].indexOf(i.status) >= 0;
 
     mount(root(),
       h('div', { class: 'app-layout' },
