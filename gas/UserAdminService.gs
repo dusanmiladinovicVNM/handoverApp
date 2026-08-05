@@ -259,10 +259,6 @@ const UserAdminService = (function () {
     return user;
   }
 
-  /**
-   * A legacy admin token has no userId behind it, so it never matches — which
-   * is correct. It is not a person, and the last-admin rule still applies.
-   */
   function _assertNotSelf(authCtx, user, message) {
     if (authCtx.userId && authCtx.userId === user.userId) {
       throw new HandoverError('FORBIDDEN', message);

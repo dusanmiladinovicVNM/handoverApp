@@ -18,19 +18,54 @@ Single Apps Script Web App endpoint. All requests are `POST` with `Content-Type:
 
 ## Auth Block
 
-Every request must include `auth`. Two flavors:
+Every request must include `auth`, except for the sign-in actions listed under
+**Public actions** below.
 
-### Internal (admin/landlord/agent — Google login)
-```json
-"auth": { "type": "google" }
-```
-Server reads `Session.getActiveUser().getEmail()` and checks against `adminEmailAllowlist` in Config.
-
-### Tenant (token link)
 ```json
 "auth": { "type": "token", "token": "<base64url>.<base64url>" }
 ```
-Server validates HMAC, expiry, and `nonce` against current inspection nonce.
+
+One shape, three kinds of token behind it.
+
+| Token | Payload | Lifetime |
+|---|---|---|
+| Session | `{ typ: 's', uid, did, exp, nonce }` | 12 h |
+| Device | `{ typ: 'd', uid, did, exp, nonce }` | 60 days |
+| Tenant | `{ iid, role: 'tenant', exp, nonce }` | set per link |
+
+For a session the server checks the HMAC and expiry, then the device row
+(present, not revoked, nonce matching, not expired) and the user row (present,
+`status: active`).
+
+**The user's role is read from the `Users` sheet on every request, never from
+the token.** A token names who you are; the sheet says what you may do. That is
+what makes revoking admin rights or disabling an account take effect on a
+session that is already open.
+
+A device token is never accepted as a session — it is only exchanged for one
+through `refreshSession`.
+
+For a tenant token the server checks the HMAC, expiry, and `nonce` against the
+inspection's current nonce.
+
+Google login is not available: an Apps Script Web App deployed with "Anyone"
+access provides no caller identity. The pre-accounts admin token has been
+removed, and tokens of that shape are refused.
+
+### Public actions
+
+`login`, `requestPasswordReset`, `setPassword` and `refreshSession` run before
+a session exists and are dispatched with no auth block at all. They are the
+only exception to "every request is authenticated"; each is rate limited and
+answers identically whether or not the account exists.
+
+### Permission levels
+
+| Level | Who |
+|---|---|
+| `requireStaff` | any signed-in account — admin or inspector |
+| `requireAdmin` | `role: admin` only |
+| `requireMatchingInspection` | a tenant token, bound to its own inspection |
 
 ### Failure response
 ```json
@@ -77,7 +112,7 @@ List all active schemas. Used on inspection creation form.
 
 **Request:**
 ```json
-{ "action": "getSchemas", "auth": { "type": "google" }, "data": {} }
+{ "action": "getSchemas", "auth": { "type": "token", "token": "<session>" }, "data": {} }
 ```
 
 **Response:**
@@ -127,7 +162,7 @@ Create new inspection. Returns inspectionId and tenant token.
 ```json
 {
   "action": "createInspection",
-  "auth": { "type": "google" },
+  "auth": { "type": "token", "token": "<session>" },
   "data": {
     "inspectionType": "move_in",
     "schemaId": "schema_move_in_v1",
@@ -467,7 +502,7 @@ Admin dashboard list. Supports filter and pagination.
 ```json
 {
   "action": "listInspections",
-  "auth": { "type": "google" },
+  "auth": { "type": "token", "token": "<session>" },
   "data": {
     "filter": {
       "status": ["draft", "under_review"],

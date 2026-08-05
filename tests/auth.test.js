@@ -223,17 +223,25 @@ module.exports = function run() {
     rejects(() => auth(token), 'the token survived a nonce rotation');
   });
 
-  section('Legacy admin token, accepted until phase 3:');
+  section('The retired admin token:');
 
-  check('a legacy token still works and is marked as legacy', () => {
-    const ctx = auth(AuthService.generateAdminToken(24, 'old device'));
-    assert(ctx.isAdmin === true && ctx.legacy === true, 'not resolved as a legacy admin');
+  // The pre-accounts credential is gone, and one of them was published in this
+  // repository's history. Its signature is still valid — the secret has not
+  // changed — so nothing but the shape check stands between that token and
+  // full admin access. This is the test that keeps it out.
+  check('a token of the old admin shape is refused, signature notwithstanding', () => {
+    const retired = signToken({
+      role: 'admin',
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      nonce: 'a'.repeat(16),
+      label: 'Dušan main device',
+    });
+    rejects(() => auth(retired), 'a pre-accounts admin token was accepted');
   });
 
-  check('a revoked legacy token stops working', () => {
-    const legacy = AuthService.generateAdminToken(24, 'old device');
-    const nonce = AuthService.listAdminTokens().slice(-1)[0].nonce;
-    AuthService.revokeAdminToken(nonce);
-    rejects(() => auth(legacy), 'a revoked legacy token was still accepted');
+  check('nothing can mint one any more', () => {
+    ['generateAdminToken', 'generateToken', 'listAdminTokens', 'revokeAdminToken']
+      .forEach(name => assert(typeof AuthService[name] === 'undefined',
+        `AuthService.${name} is still exported`));
   });
 };

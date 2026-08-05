@@ -8,9 +8,6 @@
  *
  * A device token is stored only when the user asked to be remembered. Without
  * it, closing the session means signing in again — which is the point.
- *
- * The old admin token is still read on boot so nobody is thrown out mid-
- * transition. It is never written any more, and phase 3 removes the rest.
  */
 
 import { setAuth, api } from './api.js';
@@ -18,8 +15,11 @@ import { setState } from './state.js';
 
 const SESSION_KEY = 'handover.sessionToken';
 const DEVICE_KEY = 'handover.deviceToken';
-const LEGACY_ADMIN_KEY = 'handover.adminToken';
-const LEGACY_LABEL_KEY = 'handover.adminLabel';
+
+// Written by the pre-accounts build. Never read any more — the server refuses
+// tokens of that shape — but still cleared, so a stale credential does not sit
+// in localStorage on every device that ever ran the old version.
+const RETIRED_KEYS = ['handover.adminToken', 'handover.adminLabel'];
 
 // --- Storage ---
 // Every access is wrapped: private browsing and a full quota both make
@@ -42,7 +42,6 @@ function write(key, value) {
 
 export const loadSessionToken = () => read(SESSION_KEY);
 export const loadDeviceToken = () => read(DEVICE_KEY);
-export const loadLegacyAdminToken = () => read(LEGACY_ADMIN_KEY);
 
 export function storeTokens({ sessionToken, deviceToken }) {
   write(SESSION_KEY, sessionToken || '');
@@ -54,8 +53,7 @@ export function storeTokens({ sessionToken, deviceToken }) {
 export function clearTokens() {
   write(SESSION_KEY, '');
   write(DEVICE_KEY, '');
-  write(LEGACY_ADMIN_KEY, '');
-  write(LEGACY_LABEL_KEY, '');
+  RETIRED_KEYS.forEach(key => write(key, ''));
 }
 
 // --- Naming this device ---
@@ -91,7 +89,6 @@ function applySession(result) {
   setState({
     authMode: 'user',
     user: result.user,
-    legacyAuth: false,
     authError: null,
   });
   return result.user;
@@ -124,12 +121,11 @@ export async function setPassword({ token, password, remember, deviceLabel }) {
 /**
  * Restore a signed-in state at boot.
  *
- * Order matters. The session token is tried first because it costs one call
- * and usually works; the device token is the fallback that avoids asking for a
- * password every twelve hours. The legacy admin token comes last, so a person
- * who has since been given a real account uses that instead.
+ * The session token is tried first because it costs one call and usually
+ * works; the device token is the fallback that avoids asking for a password
+ * every twelve hours.
  *
- * Returns 'user', 'legacy' or 'none'.
+ * Returns 'user' or 'none'.
  */
 export async function restoreSession() {
   const sessionToken = loadSessionToken();
@@ -137,7 +133,7 @@ export async function restoreSession() {
     setAuth({ type: 'token', token: sessionToken });
     try {
       const me = await api.me();
-      setState({ authMode: 'user', user: me.user, legacyAuth: false });
+      setState({ authMode: 'user', user: me.user });
       return 'user';
     } catch (_) {
       // Expired or revoked. The device token below may still be good.
@@ -150,26 +146,16 @@ export async function restoreSession() {
       const refreshed = await api.refreshSession(deviceToken);
       storeTokens({ sessionToken: refreshed.sessionToken, deviceToken });
       setAuth({ type: 'token', token: refreshed.sessionToken });
-      setState({ authMode: 'user', user: refreshed.user, legacyAuth: false });
+      setState({ authMode: 'user', user: refreshed.user });
       return 'user';
     } catch (_) {
       // Revoked device, disabled account, or a password change elsewhere.
     }
   }
 
-  const legacy = loadLegacyAdminToken();
-  if (legacy) {
-    setAuth({ type: 'token', token: legacy });
-    try {
-      const me = await api.me();
-      setState({ authMode: 'user', user: me.user, legacyAuth: true });
-      return 'legacy';
-    } catch (_) {}
-  }
-
   clearTokens();
   setAuth(null);
-  setState({ authMode: 'none', user: null, legacyAuth: false });
+  setState({ authMode: 'none', user: null });
   return 'none';
 }
 
@@ -183,5 +169,5 @@ export async function signOut() {
   }
   clearTokens();
   setAuth(null);
-  setState({ authMode: 'none', user: null, legacyAuth: false, authError: null });
+  setState({ authMode: 'none', user: null, authError: null });
 }

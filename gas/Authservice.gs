@@ -19,10 +19,9 @@
  *      Unchanged. Bound to one inspection, revoked by rotating that
  *      inspection's currentNonce.
  *
- *  - Admin    { role:'admin', exp, nonce, label }      DEPRECATED
- *      The pre-accounts credential. Still accepted so that phase 1 changes
- *      nothing for anyone already signed in; removed in phase 3 together with
- *      the ADMIN_NONCES property.
+ * The pre-accounts admin token is gone. It belonged to no person, lasted a
+ * year, and could only be revoked from the Apps Script editor. Any token of
+ * that shape is now simply invalid, whoever holds it.
  *
  * THE RULE: a session token names who you are, never what you may do. Authority
  * comes from the Users sheet on every single request. Were the role baked into
@@ -36,48 +35,9 @@
 
 const AuthService = (function () {
 
-  const ADMIN_NONCES_KEY = 'ADMIN_NONCES';
-
   const TOKEN_SESSION = 's';
   const TOKEN_DEVICE = 'd';
   const TOKEN_SETPW = 'setpw';
-
-  // ============================================================
-  // Legacy admin nonce list (Script Properties) — removed in phase 3
-  // ============================================================
-
-  function _loadAdminNonces() {
-    const raw = PropertiesService.getScriptProperties().getProperty(ADMIN_NONCES_KEY);
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  function _saveAdminNonces(list) {
-    PropertiesService.getScriptProperties()
-      .setProperty(ADMIN_NONCES_KEY, JSON.stringify(list));
-  }
-
-  function _addAdminNonce(entry) {
-    const list = _loadAdminNonces();
-    list.push(entry);
-    _saveAdminNonces(list);
-  }
-
-  function _hasAdminNonce(nonce) {
-    return _loadAdminNonces().some(e => e && e.nonce === nonce);
-  }
-
-  function _removeAdminNonce(nonce) {
-    const list = _loadAdminNonces();
-    const filtered = list.filter(e => e && e.nonce !== nonce);
-    _saveAdminNonces(filtered);
-    return list.length !== filtered.length;
-  }
 
   // ============================================================
   // Signing
@@ -172,57 +132,22 @@ const AuthService = (function () {
     });
   }
 
-  /** DEPRECATED — kept for the phase 1/2 transition only. */
-  function generateAdminToken(ttlHours, label) {
-    const nonce = Utils.secureRandomHex(16);
-    const payload = {
-      role: 'admin',
-      exp: Utils.nowEpochSeconds() + (ttlHours * 3600),
-      nonce: nonce,
-      label: label || 'unnamed admin device',
-    };
-    const token = _signPayload(payload);
-    _addAdminNonce({
-      nonce: nonce,
-      label: payload.label,
-      createdAt: Utils.nowIso(),
-      expiresAt: new Date(payload.exp * 1000).toISOString(),
-      tokenHash: Utils.sha256(token),
-    });
-    return token;
-  }
-
-  /** Back-compat wrapper for old callers. */
-  function generateToken(inspectionId, role, ttlHours, nonce) {
-    if (role === 'admin') return generateAdminToken(ttlHours, 'legacy');
-    return generateTenantToken(inspectionId, ttlHours, nonce);
-  }
-
   // ============================================================
   // Token verification
   // ============================================================
 
   /**
-   * Verify a tenant or legacy admin token, including revocation.
+   * Verify a tenant token, including revocation.
    * Session tokens are resolved through resolveAuth, which needs the Users row.
    */
   function verifyToken(token) {
     const payload = _verifySigned(token);
-    if (!payload || !payload.role) return null;
+    if (!payload || payload.role !== 'tenant' || !payload.iid) return null;
 
-    if (payload.role === 'admin') {
-      return _hasAdminNonce(payload.nonce) ? payload : null;
-    }
-
-    if (payload.role === 'tenant') {
-      if (!payload.iid) return null;
-      const inspection = SheetService.getInspection(payload.iid);
-      if (!inspection) return null;
-      if (inspection.currentNonce !== payload.nonce) return null;
-      return payload;
-    }
-
-    return null;
+    const inspection = SheetService.getInspection(payload.iid);
+    if (!inspection) return null;
+    if (inspection.currentNonce !== payload.nonce) return null;
+    return payload;
   }
 
   /**
@@ -288,7 +213,6 @@ const AuthService = (function () {
         'UNAUTHORIZED', 'This token cannot be used directly. Refresh the session first.');
     }
     if (payload.role === 'tenant') return _resolveTenant(payload, authBlock.token);
-    if (payload.role === 'admin') return _resolveLegacyAdmin(payload, authBlock.token);
 
     throw new HandoverError('UNAUTHORIZED', 'Invalid or expired token.');
   }
@@ -345,21 +269,6 @@ const AuthService = (function () {
     };
   }
 
-  /** DEPRECATED — removed in phase 3. */
-  function _resolveLegacyAdmin(payload, token) {
-    if (!_hasAdminNonce(payload.nonce)) {
-      throw new HandoverError('UNAUTHORIZED', 'Invalid or expired token.');
-    }
-    return {
-      type: 'token',
-      role: 'admin',
-      isAdmin: true,
-      adminLabel: payload.label || '',
-      legacy: true,
-      actorString: `admin:${payload.label || token.substring(0, 8)}`,
-    };
-  }
-
   // ============================================================
   // Permission checks
   // ============================================================
@@ -406,28 +315,9 @@ const AuthService = (function () {
     }
   }
 
-  // ============================================================
-  // Legacy admin token management — removed in phase 3
-  // ============================================================
-
-  function listAdminTokens() {
-    return _loadAdminNonces().map(e => ({
-      label: e.label,
-      createdAt: e.createdAt,
-      expiresAt: e.expiresAt,
-      nonce: e.nonce,
-    }));
-  }
-
-  function revokeAdminToken(nonce) {
-    return _removeAdminNonce(nonce);
-  }
-
   return {
     // Generation
-    generateToken,
     generateTenantToken,
-    generateAdminToken,
     generateSessionToken,
     generateDeviceToken,
     generateSetPasswordToken,
@@ -441,8 +331,5 @@ const AuthService = (function () {
     requireStaff,
     requireMatchingInspection,
     requireMatchingRole,
-    // Legacy management
-    listAdminTokens,
-    revokeAdminToken,
   };
 })();

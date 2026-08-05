@@ -6,7 +6,6 @@
  *  - URL has ?t=<token> → tenant flow, unchanged
  *  - #/set-password → no auth at all; the link is the credential
  *  - stored session or device token → signed-in account
- *  - stored legacy admin token → still accepted during the transition
  *  - none of the above → sign-in page
  */
 

@@ -23,9 +23,8 @@ const InspectionService = (function () {
     const driveFolderId = DriveService.createInspectionFolders(inspectionId);
     const nonce = Utils.generateNonce();
 
-    const tenantToken = AuthService.generateToken(
+    const tenantToken = AuthService.generateTenantToken(
       inspectionId,
-      'tenant',
       Config.getDefaultTokenTtlHours(),
       nonce
     );
@@ -309,7 +308,7 @@ const InspectionService = (function () {
 
     // Bump nonce so old tokens stop working
     const newNonce = Utils.generateNonce();
-    const newToken = AuthService.generateToken(data.inspectionId, 'tenant', ttlHours, newNonce);
+    const newToken = AuthService.generateTenantToken(data.inspectionId, ttlHours, newNonce);
 
     SheetService.updateInspection(data.inspectionId, {
       currentNonce: newNonce,
@@ -357,6 +356,7 @@ const InspectionService = (function () {
       tenantName: i.tenantName,
       createdAt: i.createdAt,
       updatedAt: i.updatedAt,
+      assignedTo: i.assignedTo || '',
     }));
 
     return {

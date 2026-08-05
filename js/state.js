@@ -20,9 +20,6 @@ const _state = {
   // thing that grants permission.
   user: null,
 
-  // True while an old pre-accounts admin token is what is signing requests.
-  legacyAuth: false,
-
   tenantToken: null,
   tenantInspectionId: null,
 
