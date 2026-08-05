@@ -75,6 +75,7 @@ function buildSheetService(db) {
     },
     getDevicesForUser: (userId, includeRevoked) =>
       db.devices.filter(d => d.userId === userId && (includeRevoked || !d.revokedAt)),
+    listDevices: () => db.devices.slice(),
     revokeDevicesForUser: (userId) => {
       const hit = db.devices.filter(d => d.userId === userId && !d.revokedAt);
       hit.forEach(d => { d.revokedAt = new Date().toISOString(); });
@@ -82,6 +83,16 @@ function buildSheetService(db) {
     },
 
     getInspection: (id) => db.inspections.find(i => i.inspectionId === id) || null,
+    createInspection: (inspection) => { db.inspections.push(inspection); },
+    updateInspection: (id, patch) => {
+      const inspection = db.inspections.find(i => i.inspectionId === id);
+      if (!inspection) throw new Error(`no such inspection: ${id}`);
+      return Object.assign(inspection, patch);
+    },
+
+    appendAuditEvent: (event) => { db.auditLog.push(event); },
+    getAuditEventsForInspection: (id) => db.auditLog.filter(e => e.inspectionId === id),
+    getAuthAuditEvents: () => db.auditLog.filter(e => !e.inspectionId),
   };
 }
 
@@ -110,9 +121,8 @@ function buildCacheService(enabled) {
 function createEnvironment(overrides, options) {
   options = options || {};
 
-  const db = { users: [], devices: [], inspections: [] };
-  const mail = { sent: [] };
-  const audit = { events: [] };
+  const db = { users: [], devices: [], inspections: [], auditLog: [] };
+  const mail = { sent: [], failNext: false };
   const properties = {};
 
   const config = Object.assign({
@@ -156,15 +166,15 @@ function createEnvironment(overrides, options) {
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     MailApp: {
-      sendEmail: (msg) => { mail.sent.push(msg); },
+      sendEmail: (msg) => {
+        if (mail.failNext) {
+          mail.failNext = false;
+          throw new Error('Specified permissions are not sufficient to call MailApp.sendEmail');
+        }
+        mail.sent.push(msg);
+      },
     },
     Config,
-    AuditService: {
-      log: (inspectionId, actor, eventType, details) =>
-        audit.events.push({ inspectionId, actor, eventType, details }),
-      logAuth: (actor, eventType, details) =>
-        audit.events.push({ inspectionId: '', actor, eventType, details }),
-    },
     // The services log freely at INFO and WARN, which would bury the results.
     // Errors still come through, and VERBOSE=1 restores the rest.
     console: process.env.VERBOSE
@@ -176,10 +186,12 @@ function createEnvironment(overrides, options) {
 
   const ctx = vm.createContext(sandbox);
 
-  // Order matters: each file defines a const the later ones close over.
+  // Order matters only for `const` visibility at load time, not for the code
+  // under test — Router.gs proves that by resolving its services lazily.
   const sources = [
     'Utils.gs', 'PasswordService.gs', 'UserService.gs', 'DeviceService.gs',
-    'MailService.gs', 'Authservice.gs', 'AccountService.gs',
+    'MailService.gs', 'AuditService.gs', 'Authservice.gs', 'AccountService.gs',
+    'UserAdminService.gs',
   ];
   const code = sources
     .map(f => fs.readFileSync(path.join(GAS_DIR, f), 'utf8'))
@@ -187,11 +199,15 @@ function createEnvironment(overrides, options) {
     // `const` at script top level is lexical, so the values have to be handed
     // out explicitly rather than read off the context.
     + '\nglobalThis.__exports = { Utils, PasswordService, UserService, ' +
-      'DeviceService, MailService, AuthService, AccountService, HandoverError };';
+      'DeviceService, MailService, AuditService, AuthService, AccountService, ' +
+      'UserAdminService, HandoverError };';
 
   vm.runInContext(code, ctx);
 
-  return Object.assign({}, ctx.__exports, { db, mail, audit, config, properties });
+  // audit.events is the same array the log writes into, not a copy.
+  return Object.assign({}, ctx.__exports, {
+    db, mail, config, properties, audit: { events: db.auditLog },
+  });
 }
 
 // --- Minimal assertion helpers ---

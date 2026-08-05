@@ -8,13 +8,21 @@
 const _state = {
   // Auth resolution at boot:
   //   'unknown'  — not yet checked
-  //   'admin'    — admin token (from localStorage), verified
+  //   'user'     — signed in with an account
   //   'tenant'   — tenant token from URL ?t=, verified
-  //   'none'     — no auth available (show admin login screen)
+  //   'none'     — not signed in (show the sign-in screen)
   authMode: 'unknown',
   authError: null,
-  adminToken: null,
-  adminLabel: null,
+
+  // The signed-in account: { userId, email, name, role, status, ... }
+  // Role lives here rather than in the token, and the server re-reads it on
+  // every request — so this copy is for rendering only. Never treat it as the
+  // thing that grants permission.
+  user: null,
+
+  // True while an old pre-accounts admin token is what is signing requests.
+  legacyAuth: false,
+
   tenantToken: null,
   tenantInspectionId: null,
 
@@ -46,6 +54,11 @@ export function setState(patch) {
 export function subscribe(fn) {
   _listeners.add(fn);
   return () => _listeners.delete(fn);
+}
+
+/** Convenience for rendering. Authorization itself is decided on the server. */
+export function isAdmin() {
+  return !!(_state.user && _state.user.role === 'admin');
 }
 
 /**

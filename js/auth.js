@@ -1,63 +1,187 @@
 /**
  * auth.js
- * Admin token persistence and validation helpers.
- * Extracted from app.js so pages.js can import without circular dependency.
+ * Credential storage and the sign-in calls that use it.
+ *
+ * Two tokens live on the device:
+ *  - session, short-lived, sent with every request
+ *  - device, long-lived, only ever exchanged for a fresh session
+ *
+ * A device token is stored only when the user asked to be remembered. Without
+ * it, closing the session means signing in again — which is the point.
+ *
+ * The old admin token is still read on boot so nobody is thrown out mid-
+ * transition. It is never written any more, and phase 3 removes the rest.
  */
 
 import { setAuth, api } from './api.js';
 import { setState } from './state.js';
 
-const ADMIN_TOKEN_STORAGE_KEY = 'handover.adminToken';
-const ADMIN_LABEL_STORAGE_KEY = 'handover.adminLabel';
+const SESSION_KEY = 'handover.sessionToken';
+const DEVICE_KEY = 'handover.deviceToken';
+const LEGACY_ADMIN_KEY = 'handover.adminToken';
+const LEGACY_LABEL_KEY = 'handover.adminLabel';
 
-export function saveAdminToken(token, label) {
-  try {
-    localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
-    if (label) localStorage.setItem(ADMIN_LABEL_STORAGE_KEY, label);
-  } catch (_) {}
-}
+// --- Storage ---
+// Every access is wrapped: private browsing and a full quota both make
+// localStorage throw, and neither is a reason to break the whole app.
 
-export function loadAdminToken() {
+function read(key) {
   try {
-    return localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
+    return localStorage.getItem(key);
   } catch (_) {
     return null;
   }
 }
 
-export function loadAdminLabel() {
+function write(key, value) {
   try {
-    return localStorage.getItem(ADMIN_LABEL_STORAGE_KEY) || '';
-  } catch (_) {
-    return '';
-  }
-}
-
-export function clearAdminToken() {
-  try {
-    localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
-    localStorage.removeItem(ADMIN_LABEL_STORAGE_KEY);
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
   } catch (_) {}
 }
 
+export const loadSessionToken = () => read(SESSION_KEY);
+export const loadDeviceToken = () => read(DEVICE_KEY);
+export const loadLegacyAdminToken = () => read(LEGACY_ADMIN_KEY);
+
+export function storeTokens({ sessionToken, deviceToken }) {
+  write(SESSION_KEY, sessionToken || '');
+  // Absent deviceToken means "not remembered", so clear any earlier one rather
+  // than leaving a stale token that would silently keep this device signed in.
+  write(DEVICE_KEY, deviceToken || '');
+}
+
+export function clearTokens() {
+  write(SESSION_KEY, '');
+  write(DEVICE_KEY, '');
+  write(LEGACY_ADMIN_KEY, '');
+  write(LEGACY_LABEL_KEY, '');
+}
+
+// --- Naming this device ---
+
 /**
- * Validate a candidate admin token by calling getSchemas().
- * Returns true and stores the token on success.
+ * A guess at something the owner will recognise in the device list. Crude by
+ * design — it only has to be better than "Unnamed device", and the user can
+ * edit it on the sign-in form.
  */
-export async function tryAdminToken(token) {
-  setAuth({ type: 'token', token });
-  try {
-    await api.getSchemas();
-    saveAdminToken(token);
-    setState({
-      authMode: 'admin',
-      adminToken: token,
-      adminLabel: loadAdminLabel(),
-      authError: null,
-    });
-    return true;
-  } catch (e) {
-    setAuth(null);
-    return false;
+export function suggestDeviceLabel() {
+  const ua = navigator.userAgent || '';
+  const platform =
+    /iPhone/i.test(ua) ? 'iPhone' :
+    /iPad/i.test(ua) ? 'iPad' :
+    /Android/i.test(ua) ? 'Android' :
+    /Macintosh/i.test(ua) ? 'Mac' :
+    /Windows/i.test(ua) ? 'Windows' :
+    /Linux/i.test(ua) ? 'Linux' : 'Device';
+  const browser =
+    /Edg\//i.test(ua) ? 'Edge' :
+    /OPR\//i.test(ua) ? 'Opera' :
+    /Chrome\//i.test(ua) ? 'Chrome' :
+    /Firefox\//i.test(ua) ? 'Firefox' :
+    /Safari\//i.test(ua) ? 'Safari' : '';
+  return browser ? `${platform} ${browser}` : platform;
+}
+
+// --- Applying a signed-in result ---
+
+function applySession(result) {
+  storeTokens(result);
+  setAuth({ type: 'token', token: result.sessionToken });
+  setState({
+    authMode: 'user',
+    user: result.user,
+    legacyAuth: false,
+    authError: null,
+  });
+  return result.user;
+}
+
+// --- Sign-in flows ---
+
+export async function login({ email, password, remember, deviceLabel }) {
+  const result = await api.login({
+    email,
+    password,
+    remember: !!remember,
+    deviceLabel: deviceLabel || suggestDeviceLabel(),
+    userAgent: navigator.userAgent || '',
+  });
+  return applySession(result);
+}
+
+export async function setPassword({ token, password, remember, deviceLabel }) {
+  const result = await api.setPassword({
+    token,
+    password,
+    remember: !!remember,
+    deviceLabel: deviceLabel || suggestDeviceLabel(),
+    userAgent: navigator.userAgent || '',
+  });
+  return applySession(result);
+}
+
+/**
+ * Restore a signed-in state at boot.
+ *
+ * Order matters. The session token is tried first because it costs one call
+ * and usually works; the device token is the fallback that avoids asking for a
+ * password every twelve hours. The legacy admin token comes last, so a person
+ * who has since been given a real account uses that instead.
+ *
+ * Returns 'user', 'legacy' or 'none'.
+ */
+export async function restoreSession() {
+  const sessionToken = loadSessionToken();
+  if (sessionToken) {
+    setAuth({ type: 'token', token: sessionToken });
+    try {
+      const me = await api.me();
+      setState({ authMode: 'user', user: me.user, legacyAuth: false });
+      return 'user';
+    } catch (_) {
+      // Expired or revoked. The device token below may still be good.
+    }
   }
+
+  const deviceToken = loadDeviceToken();
+  if (deviceToken) {
+    try {
+      const refreshed = await api.refreshSession(deviceToken);
+      storeTokens({ sessionToken: refreshed.sessionToken, deviceToken });
+      setAuth({ type: 'token', token: refreshed.sessionToken });
+      setState({ authMode: 'user', user: refreshed.user, legacyAuth: false });
+      return 'user';
+    } catch (_) {
+      // Revoked device, disabled account, or a password change elsewhere.
+    }
+  }
+
+  const legacy = loadLegacyAdminToken();
+  if (legacy) {
+    setAuth({ type: 'token', token: legacy });
+    try {
+      const me = await api.me();
+      setState({ authMode: 'user', user: me.user, legacyAuth: true });
+      return 'legacy';
+    } catch (_) {}
+  }
+
+  clearTokens();
+  setAuth(null);
+  setState({ authMode: 'none', user: null, legacyAuth: false });
+  return 'none';
+}
+
+export async function signOut() {
+  try {
+    await api.signOut();
+  } catch (_) {
+    // The device may already be revoked, or the network may be down. Either
+    // way the local tokens go — a sign-out that fails silently and leaves the
+    // user signed in is worse than one that cannot reach the server.
+  }
+  clearTokens();
+  setAuth(null);
+  setState({ authMode: 'none', user: null, legacyAuth: false, authError: null });
 }

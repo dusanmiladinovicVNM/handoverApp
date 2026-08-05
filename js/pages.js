@@ -24,14 +24,17 @@ import {
 } from './components.js';
 import { toastSuccess, toastError, toastWarning, confirm, openModal } from './ui.js';
 import {
-  getState, setState, setInspectionData, patchAnswer
+  getState, setState, setInspectionData, patchAnswer, isAdmin
 } from './state.js';
 import {
   buildAnswersMap, isItemVisible, sectionProgress,
   inspectionProgress, findAllMissingRequired
 } from './validator.js';
 import { AUTOSAVE_DEBOUNCE_MS } from './config.js';
-import { tryAdminToken, clearAdminToken, saveAdminToken } from './auth.js';
+import {
+  login as authLogin, setPassword as authSetPassword,
+  signOut as authSignOut, suggestDeviceLabel,
+} from './auth.js';
 
 const root = () => document.getElementById('app-root');
 
@@ -47,77 +50,376 @@ export function pageHome() {
     return;
   }
 
-  if (state.authMode === 'admin') {
+  if (state.authMode === 'user') {
     navigate('/admin', true);
     return;
   }
 
-  // Not authenticated → admin login
+  // Not signed in
   navigate('/login', true);
 }
 
 // ============================================================
-// pageAdminLogin — paste admin token
+// Sign-in
 // ============================================================
 
-export function pageAdminLogin() {
-  let token = '';
-  let trying = false;
+/** Shared shell for the four screens that render before anyone is signed in. */
+function authShell(title, ...children) {
+  return h('div', { class: 'app-layout' },
+    appHeader({ title }),
+    h('main', { class: 'app-body' },
+      h('div', { class: 'page' }, ...children)
+    )
+  );
+}
 
-  async function submit() {
-    if (!token.trim()) {
-      toastWarning('Paste a token first.');
+function formField(label, attrs, hint) {
+  return h('div', { class: 'form-group' },
+    h('label', { class: 'form-label' }, label),
+    h('input', Object.assign({ class: 'form-input' }, attrs)),
+    hint ? h('p', { class: 'form-hint text-xs text-muted' }, hint) : null,
+  );
+}
+
+export function pageLogin() {
+  let email = '';
+  let password = '';
+  let remember = true;
+  let busy = false;
+  let error = null;
+
+  async function submit(e) {
+    if (e) e.preventDefault();
+    if (!email.trim() || !password) {
+      error = 'Enter your email address and password.';
+      render();
       return;
     }
-    trying = true; render();
-    const ok = await tryAdminToken(token.trim());
-    trying = false;
-    if (ok) {
-      toastSuccess('Signed in.');
+    busy = true; error = null; render();
+    try {
+      const user = await authLogin({
+        email: email.trim(),
+        password,
+        remember,
+        deviceLabel: suggestDeviceLabel(),
+      });
+      toastSuccess(`Signed in as ${user.name}.`);
       navigate('/admin');
-    } else {
-      toastError('Token invalid or expired.');
+    } catch (err) {
+      // The server answers identically for an unknown address, a wrong
+      // password and a disabled account, so that the form cannot be used to
+      // find out who works here. Passing its message straight through keeps
+      // that property intact.
+      error = err.message || 'Sign-in failed.';
+      password = '';
+      busy = false;
       render();
     }
   }
 
   function render() {
     const state = getState();
+    mount(root(), authShell('Sign in',
+      h('form', { class: 'card', onSubmit: submit },
+        h('h2', { class: 'card__title' }, 'Sign in'),
+        h('p', { class: 'text-muted text-sm mt-2' },
+          'Use the email address your account was created with.'),
+
+        error || state.authError
+          ? h('div', { class: 'banner banner--danger mt-3' },
+              h('div', { class: 'banner__icon' }, '!'),
+              h('div', { class: 'banner__body' }, error || state.authError))
+          : null,
+
+        h('div', { class: 'mt-4' },
+          formField('Email', {
+            type: 'email',
+            autocomplete: 'username',
+            inputmode: 'email',
+            value: email,
+            autofocus: true,
+            onInput: (e) => { email = e.target.value; },
+          }),
+          formField('Password', {
+            type: 'password',
+            autocomplete: 'current-password',
+            onInput: (e) => { password = e.target.value; },
+          }),
+        ),
+
+        h('label', { class: 'form-check' },
+          h('input', {
+            type: 'checkbox',
+            checked: remember,
+            onChange: (e) => { remember = e.target.checked; },
+          }),
+          h('span', null, 'Remember this device'),
+        ),
+
+        h('button', {
+          type: 'submit',
+          class: 'btn btn--primary btn--block mt-4',
+          disabled: busy || undefined,
+        }, busy ? 'Signing in…' : 'Sign in'),
+
+        h('p', { class: 'text-sm mt-4', style: { textAlign: 'center' } },
+          h('a', { href: '#/forgot-password' }, 'Forgot your password?')),
+
+        h('hr', { style: { border: 'none', borderTop: '1px solid var(--color-border)', margin: '1.5rem 0' }}),
+        h('p', { class: 'text-xs text-muted' },
+          'Tenants do not sign in — they receive a direct link for their inspection.'),
+      )
+    ));
+  }
+  render();
+}
+
+// ============================================================
+// pageSetPassword — arrived here from a link in an email
+// ============================================================
+
+export function pageSetPassword(ctx) {
+  const token = (ctx && ctx.query && ctx.query.k) || '';
+  let password = '';
+  let confirmValue = '';
+  let remember = true;
+  let busy = false;
+  let error = null;
+
+  async function submit(e) {
+    if (e) e.preventDefault();
+    if (password !== confirmValue) {
+      error = 'The two passwords do not match.';
+      render();
+      return;
+    }
+    busy = true; error = null; render();
+    try {
+      const user = await authSetPassword({
+        token, password, remember, deviceLabel: suggestDeviceLabel(),
+      });
+      toastSuccess(`Welcome, ${user.name}.`);
+      navigate('/admin');
+    } catch (err) {
+      // Length and common-padding rules are enforced on the server, so its
+      // wording is the authoritative one. Repeating the rules here would mean
+      // two places to keep in step, and the client copy losing.
+      error = err.message || 'Could not set the password.';
+      busy = false;
+      render();
+    }
+  }
+
+  function render() {
+    if (!token) {
+      mount(root(), authShell('Set password',
+        h('div', { class: 'card' },
+          h('h2', { class: 'card__title' }, 'This link is incomplete'),
+          h('p', { class: 'text-muted text-sm mt-2' },
+            'Open the link from your email exactly as it was sent, or ask for a new one.'),
+          h('a', { class: 'btn btn--secondary btn--block mt-4', href: '#/forgot-password' },
+            'Send me a new link'),
+        )
+      ));
+      return;
+    }
+
+    mount(root(), authShell('Set password',
+      h('form', { class: 'card', onSubmit: submit },
+        h('h2', { class: 'card__title' }, 'Choose your password'),
+        h('p', { class: 'text-muted text-sm mt-2' },
+          'Four unrelated words make a password that is easy to remember and ' +
+          'hard to guess — far better than a short one with symbols in it.'),
+
+        error
+          ? h('div', { class: 'banner banner--danger mt-3' },
+              h('div', { class: 'banner__icon' }, '!'),
+              h('div', { class: 'banner__body' }, error))
+          : null,
+
+        h('div', { class: 'mt-4' },
+          formField('New password', {
+            type: 'password',
+            autocomplete: 'new-password',
+            autofocus: true,
+            onInput: (e) => { password = e.target.value; },
+          }, 'At least 16 characters.'),
+          formField('Repeat password', {
+            type: 'password',
+            autocomplete: 'new-password',
+            onInput: (e) => { confirmValue = e.target.value; },
+          }),
+        ),
+
+        h('label', { class: 'form-check' },
+          h('input', {
+            type: 'checkbox',
+            checked: remember,
+            onChange: (e) => { remember = e.target.checked; },
+          }),
+          h('span', null, 'Remember this device'),
+        ),
+
+        h('button', {
+          type: 'submit',
+          class: 'btn btn--primary btn--block mt-4',
+          disabled: busy || undefined,
+        }, busy ? 'Saving…' : 'Set password and sign in'),
+
+        h('p', { class: 'text-xs text-muted mt-3' },
+          'Any device already signed in to this account will be signed out.'),
+      )
+    ));
+  }
+  render();
+}
+
+// ============================================================
+// pageForgotPassword
+// ============================================================
+
+export function pageForgotPassword() {
+  let email = '';
+  let busy = false;
+  let sent = false;
+  let error = null;
+
+  async function submit(e) {
+    if (e) e.preventDefault();
+    busy = true; error = null; render();
+    try {
+      await api.requestPasswordReset(email.trim());
+      sent = true;
+    } catch (err) {
+      error = err.message || 'Could not send the link.';
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  function render() {
+    mount(root(), authShell('Password reset',
+      sent
+        ? h('div', { class: 'card' },
+            h('h2', { class: 'card__title' }, 'Check your inbox'),
+            // Deliberately not "we sent you an email": the server answers the
+            // same way whether or not the address has an account, and saying
+            // more here would give away what it withholds.
+            h('p', { class: 'text-muted text-sm mt-2' },
+              'If that address belongs to an account, a link is on its way. ' +
+              'It is valid for 48 hours and can be used once.'),
+            h('a', { class: 'btn btn--secondary btn--block mt-4', href: '#/login' },
+              'Back to sign in'))
+        : h('form', { class: 'card', onSubmit: submit },
+            h('h2', { class: 'card__title' }, 'Send a reset link'),
+            h('p', { class: 'text-muted text-sm mt-2' },
+              'We will email you a link on which you can choose a new password.'),
+            error
+              ? h('div', { class: 'banner banner--danger mt-3' },
+                  h('div', { class: 'banner__icon' }, '!'),
+                  h('div', { class: 'banner__body' }, error))
+              : null,
+            h('div', { class: 'mt-4' },
+              formField('Email', {
+                type: 'email',
+                autocomplete: 'username',
+                inputmode: 'email',
+                autofocus: true,
+                onInput: (e) => { email = e.target.value; },
+              })),
+            h('button', {
+              type: 'submit',
+              class: 'btn btn--primary btn--block mt-4',
+              disabled: busy || undefined,
+            }, busy ? 'Sending…' : 'Send link'),
+            h('p', { class: 'text-sm mt-4', style: { textAlign: 'center' } },
+              h('a', { href: '#/login' }, 'Back to sign in')),
+          )
+    ));
+  }
+  render();
+}
+
+// ============================================================
+// pageProfile — own account
+// ============================================================
+
+export function pageProfile() {
+  let oldPassword = '';
+  let newPassword = '';
+  let confirmValue = '';
+  let busy = false;
+  let error = null;
+
+  async function submit(e) {
+    if (e) e.preventDefault();
+    if (newPassword !== confirmValue) {
+      error = 'The two new passwords do not match.';
+      render();
+      return;
+    }
+    busy = true; error = null; render();
+    try {
+      await api.changePassword(oldPassword, newPassword);
+      // Changing a password revokes every device, this one included. Signing
+      // out locally keeps the app honest about that rather than leaving it
+      // holding a token the server has already stopped accepting.
+      await authSignOut();
+      toastSuccess('Password changed. Please sign in again.');
+      navigate('/login');
+    } catch (err) {
+      error = err.message || 'Could not change the password.';
+      busy = false;
+      render();
+    }
+  }
+
+  function render() {
+    const user = getState().user || {};
     mount(root(),
       h('div', { class: 'app-layout' },
-        appHeader({ title: 'Admin Sign-in' }),
+        appHeader({ title: 'My account', onBack: () => navigate('/admin') }),
         h('main', { class: 'app-body' },
           h('div', { class: 'page' },
             h('div', { class: 'card' },
-              h('h2', { class: 'card__title' }, 'Paste admin token'),
+              h('h2', { class: 'card__title' }, user.name || ''),
+              h('p', { class: 'text-muted text-sm mt-1' }, user.email || ''),
+              h('p', { class: 'text-sm mt-3' },
+                h('span', { class: 'badge' }, user.role === 'admin' ? 'Admin' : 'Inspector')),
+            ),
+
+            h('form', { class: 'card mt-4', onSubmit: submit },
+              h('h2', { class: 'card__title' }, 'Change password'),
               h('p', { class: 'text-muted text-sm mt-2' },
-                'Generate a token in the Apps Script editor by running ',
-                h('code', null, 'generateAdminTokenForMe()'),
-                ', then paste the value here. Token is stored on this device only.'),
-              state.authError
-                ? h('div', { class: 'banner banner--warning mt-3' },
+                'All signed-in devices will be signed out, including this one.'),
+              error
+                ? h('div', { class: 'banner banner--danger mt-3' },
                     h('div', { class: 'banner__icon' }, '!'),
-                    h('div', { class: 'banner__body' }, state.authError))
+                    h('div', { class: 'banner__body' }, error))
                 : null,
-              h('div', { class: 'form-group mt-4' },
-                h('label', { class: 'form-label' }, 'Admin token'),
-                h('textarea', {
-                  class: 'form-textarea text-mono text-sm',
-                  rows: '4',
-                  placeholder: 'eyJ...',
-                  onInput: (e) => { token = e.target.value; },
-                  autofocus: true,
-                }, ''),
+              h('div', { class: 'mt-4' },
+                formField('Current password', {
+                  type: 'password',
+                  autocomplete: 'current-password',
+                  onInput: (e) => { oldPassword = e.target.value; },
+                }),
+                formField('New password', {
+                  type: 'password',
+                  autocomplete: 'new-password',
+                  onInput: (e) => { newPassword = e.target.value; },
+                }, 'At least 16 characters.'),
+                formField('Repeat new password', {
+                  type: 'password',
+                  autocomplete: 'new-password',
+                  onInput: (e) => { confirmValue = e.target.value; },
+                }),
               ),
               h('button', {
-                class: 'btn btn--primary btn--block',
-                disabled: trying || undefined,
-                onClick: submit,
-              }, trying ? 'Verifying…' : 'Sign in'),
-
-              h('hr', { style: { border: 'none', borderTop: '1px solid var(--color-border)', margin: '1.5rem 0' }}),
-              h('p', { class: 'text-xs text-muted' },
-                'If you don\'t have a token, ask the system owner. Tenants do not need to sign in — they receive direct links.'),
+                type: 'submit',
+                class: 'btn btn--primary btn--block mt-2',
+                disabled: busy || undefined,
+              }, busy ? 'Saving…' : 'Change password'),
             ),
           )
         )
@@ -125,6 +427,509 @@ export function pageAdminLogin() {
     );
   }
   render();
+}
+
+// ============================================================
+// pageAdminUsers — account administration
+// ============================================================
+
+export function pageAdminUsers() {
+  let users = [];
+  let activeAdmins = 0;
+  let loading = true;
+  let error = null;
+  let search = '';
+  let filter = 'all';
+
+  const FILTERS = [
+    ['all', 'All'],
+    ['active', 'Active'],
+    ['disabled', 'Disabled'],
+    ['admin', 'Admins'],
+    ['nopassword', 'No password yet'],
+    ['locked', 'Locked'],
+  ];
+
+  async function load() {
+    loading = true; render();
+    try {
+      const res = await api.listUsers();
+      users = res.users || [];
+      activeAdmins = res.activeAdmins || 0;
+      error = null;
+    } catch (e) {
+      error = e.message;
+    } finally {
+      loading = false;
+      render();
+    }
+  }
+
+  /** Wrap a mutation so every one of them reports and reloads the same way. */
+  async function act(fn, successMessage) {
+    try {
+      const result = await fn();
+      if (successMessage) toastSuccess(successMessage);
+      await load();
+      return result;
+    } catch (e) {
+      // Guardrail refusals (last admin, own account) arrive as FORBIDDEN with a
+      // message written for a person. Showing it verbatim is the whole point.
+      toastError(e.message);
+      return null;
+    }
+  }
+
+  function visibleUsers() {
+    const q = search.trim().toLowerCase();
+    return users.filter(u => {
+      if (q && String(u.name).toLowerCase().indexOf(q) < 0
+            && String(u.email).toLowerCase().indexOf(q) < 0) return false;
+      if (filter === 'active') return u.status === 'active';
+      if (filter === 'disabled') return u.status === 'disabled';
+      if (filter === 'admin') return u.role === 'admin';
+      if (filter === 'nopassword') return !u.hasPassword;
+      if (filter === 'locked') return !!u.lockedUntil;
+      return true;
+    });
+  }
+
+  // --- Badges ---
+
+  function userBadges(u) {
+    const out = [];
+    out.push(h('span', { class: ['badge', u.role === 'admin' ? 'badge--info' : ''] },
+      u.role === 'admin' ? 'Admin' : 'Inspector'));
+    if (u.status === 'disabled') {
+      out.push(h('span', { class: 'badge badge--danger' }, 'Disabled'));
+    }
+    if (u.lockedUntil) {
+      out.push(h('span', { class: 'badge badge--warning' }, 'Locked'));
+    }
+    // Derived rather than stored: a third status would be a third state to
+    // keep consistent, and this says the same thing.
+    if (!u.hasPassword) {
+      out.push(h('span', { class: 'badge badge--warning' }, 'No password yet'));
+    }
+    return out;
+  }
+
+  // --- Add user ---
+
+  function openAddUser() {
+    let name = '', email = '', role = 'inspector';
+    let busy = false;
+
+    const errorSlot = h('div');
+    const body = h('div', null,
+      formField('Name', { autofocus: true, onInput: (e) => { name = e.target.value; } }),
+      formField('Email', {
+        type: 'email', inputmode: 'email',
+        onInput: (e) => { email = e.target.value; },
+      }),
+      h('div', { class: 'form-group' },
+        h('label', { class: 'form-label' }, 'Role'),
+        h('select', {
+          class: 'form-select',
+          onChange: (e) => { role = e.target.value; },
+        },
+          h('option', { value: 'inspector' }, 'Inspector'),
+          h('option', { value: 'admin' }, 'Admin'),
+        ),
+      ),
+      h('p', { class: 'text-xs text-muted' },
+        'They will receive a link to choose their own password. No password is ' +
+        'ever sent by email.'),
+      errorSlot,
+    );
+
+    const submitBtn = h('button', { class: 'btn btn--primary', onClick: submit }, 'Add user');
+    const modal = openModal({
+      title: 'Add user',
+      body,
+      footer: [
+        h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, 'Cancel'),
+        submitBtn,
+      ],
+    });
+
+    async function submit() {
+      if (busy) return;
+      busy = true;
+      submitBtn.textContent = 'Adding…';
+      submitBtn.setAttribute('disabled', '');
+      try {
+        const res = await api.createUser(name.trim(), email.trim(), role);
+        modal.close();
+        await load();
+        // Creating the account and delivering the link are separate things,
+        // and only one of them can fail. Saying which is what lets the admin
+        // act: resend, or hand the link over another way.
+        if (res.delivery && res.delivery.emailed) {
+          toastSuccess(`${res.user.name} added. Link sent to ${res.user.email}.`);
+        } else {
+          showLinkFallback(res.user, res.delivery);
+        }
+      } catch (e) {
+        busy = false;
+        submitBtn.textContent = 'Add user';
+        submitBtn.removeAttribute('disabled');
+        mount(errorSlot, h('div', { class: 'banner banner--danger mt-3' },
+          h('div', { class: 'banner__icon' }, '!'),
+          h('div', { class: 'banner__body' }, e.message)));
+      }
+    }
+  }
+
+  /** Mail failed — offer the link itself rather than leaving the admin stuck. */
+  function showLinkFallback(user, delivery) {
+    const field = h('textarea', {
+      class: 'form-textarea text-mono text-xs',
+      rows: '4',
+      readonly: true,
+    }, (delivery && delivery.url) || '');
+
+    const modal = openModal({
+      title: 'Email could not be sent',
+      body: h('div', null,
+        h('p', { class: 'text-sm' },
+          `The account for ${user.email} exists and is ready. Only the email ` +
+          'failed, so pass this link on yourself:'),
+        h('div', { class: 'form-group mt-3' }, field),
+        delivery && delivery.error
+          ? h('p', { class: 'text-xs text-muted' }, delivery.error)
+          : null,
+      ),
+      footer: [
+        h('button', {
+          class: 'btn btn--secondary',
+          onClick: () => {
+            field.select();
+            try { document.execCommand('copy'); toastSuccess('Link copied.'); }
+            catch (_) { toastWarning('Copy it manually.'); }
+          },
+        }, 'Copy link'),
+        h('button', { class: 'btn btn--primary', onClick: () => modal.close() }, 'Done'),
+      ],
+    });
+  }
+
+  // --- One user ---
+
+  function openUser(u) {
+    const me = getState().user || {};
+    const isSelf = !!me.userId && me.userId === u.userId;
+    const isLastAdmin = u.role === 'admin' && u.status === 'active' && activeAdmins <= 1;
+
+    // Explaining why a button is missing beats silently omitting it — the admin
+    // is otherwise left wondering whether the screen is broken.
+    function guard(reason) {
+      return reason ? h('p', { class: 'text-xs text-muted mt-1' }, reason) : null;
+    }
+
+    const modal = openModal({
+      title: u.name,
+      body: h('div', null,
+        h('p', { class: 'text-muted text-sm' }, u.email),
+        h('div', { class: 'badge-row mt-2' }, userBadges(u)),
+
+        h('dl', { class: 'detail-list mt-4' },
+          detailRow('Last sign-in', u.lastLoginAt ? formatDateTime(u.lastLoginAt) : 'Never'),
+          detailRow('Active devices', String(u.deviceCount || 0)),
+          detailRow('Created', u.createdAt ? formatDateTime(u.createdAt) : '—'),
+          u.createdBy ? detailRow('Created by', u.createdBy) : null,
+          u.status === 'disabled' && u.disabledAt
+            ? detailRow('Disabled', `${formatDateTime(u.disabledAt)} by ${u.disabledBy || '—'}`)
+            : null,
+          u.lockedUntil ? detailRow('Locked until', formatDateTime(u.lockedUntil)) : null,
+        ),
+
+        h('div', { class: 'mt-4' },
+          h('h3', { class: 'text-sm text-muted' }, 'Actions'),
+
+          h('div', { class: 'stack mt-2' },
+            // Status
+            u.status === 'active'
+              ? h('div', null,
+                  h('button', {
+                    class: 'btn btn--danger btn--block',
+                    disabled: (isSelf || isLastAdmin) || undefined,
+                    onClick: () => confirmAnd(modal,
+                      'Disable access?',
+                      `${u.name} will be signed out of every device immediately and ` +
+                      'will not be able to sign in again.',
+                      'Disable', true,
+                      () => api.setUserStatus(u.userId, 'disabled'),
+                      `${u.name} no longer has access.`),
+                  }, 'Disable access'),
+                  guard(isSelf ? 'You cannot disable your own account.'
+                    : isLastAdmin ? 'This is the only active administrator.' : null))
+              : h('button', {
+                  class: 'btn btn--primary btn--block',
+                  onClick: () => confirmAnd(modal,
+                    'Restore access?',
+                    `${u.name} will be able to sign in again. Their old devices stay ` +
+                    'signed out — they will sign in fresh.',
+                    'Restore', false,
+                    () => api.setUserStatus(u.userId, 'active'),
+                    `${u.name} has access again.`),
+                }, 'Restore access'),
+
+            // Role
+            u.role === 'admin'
+              ? h('div', null,
+                  h('button', {
+                    class: 'btn btn--secondary btn--block',
+                    disabled: (isSelf || isLastAdmin) || undefined,
+                    onClick: () => confirmAnd(modal,
+                      'Remove admin rights?',
+                      `${u.name} will keep their account but lose access to account ` +
+                      'administration.',
+                      'Remove', false,
+                      () => api.setUserRole(u.userId, 'inspector'),
+                      `${u.name} is now an inspector.`),
+                  }, 'Remove admin rights'),
+                  guard(isSelf ? 'You cannot remove your own admin rights.'
+                    : isLastAdmin ? 'Promote someone else first.' : null))
+              : h('button', {
+                  class: 'btn btn--secondary btn--block',
+                  onClick: () => confirmAnd(modal,
+                    'Grant admin rights?',
+                    `${u.name} will be able to add and disable users, and grant admin ` +
+                    'rights to others.',
+                    'Grant', false,
+                    () => api.setUserRole(u.userId, 'admin'),
+                    `${u.name} is now an admin.`),
+                }, 'Grant admin rights'),
+
+            u.lockedUntil
+              ? h('button', {
+                  class: 'btn btn--secondary btn--block',
+                  onClick: () => { modal.close(); act(() => api.unlockUser(u.userId), 'Account unlocked.'); },
+                }, 'Unlock account')
+              : null,
+
+            u.status === 'active'
+              ? h('button', {
+                  class: 'btn btn--secondary btn--block',
+                  onClick: async () => {
+                    modal.close();
+                    const res = await act(() => api.sendPasswordLink(u.userId), null);
+                    if (!res) return;
+                    if (res.delivery && res.delivery.emailed) toastSuccess(`Link sent to ${u.email}.`);
+                    else showLinkFallback(u, res.delivery);
+                  },
+                }, u.hasPassword ? 'Send a password reset link' : 'Resend the invitation link')
+              : null,
+
+            u.deviceCount > 0
+              ? h('button', {
+                  class: 'btn btn--secondary btn--block',
+                  onClick: () => { modal.close(); openDevices(u); },
+                }, `Devices (${u.deviceCount})`)
+              : null,
+
+            h('button', {
+              class: 'btn btn--ghost btn--block',
+              onClick: () => { modal.close(); openHistory(u); },
+            }, 'History'),
+          )
+        )
+      ),
+      footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, 'Close')],
+    });
+  }
+
+  async function confirmAnd(modal, title, message, confirmLabel, danger, fn, success) {
+    modal.close();
+    const ok = await confirm({ title, message, confirmLabel, danger });
+    if (!ok) return;
+    await act(fn, success);
+  }
+
+  function openDevices(u) {
+    const slot = h('div', null, h('div', { class: 'boot-spinner' }));
+    const modal = openModal({
+      title: `${u.name} — devices`,
+      body: slot,
+      footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, 'Close')],
+    });
+
+    api.listUserDevices(u.userId).then(res => {
+      const devices = res.devices || [];
+      mount(slot,
+        devices.length === 0
+          ? h('p', { class: 'text-muted text-sm' }, 'No devices are signed in.')
+          : h('ul', { class: 'list' },
+              devices.map(d => h('li', { class: 'list-item' },
+                h('div', { class: 'list-item__main' },
+                  h('div', { class: 'list-item__title' }, d.label),
+                  h('div', { class: 'list-item__meta' },
+                    `Last used ${formatDateTime(d.lastSeenAt)} · expires ${formatDate(d.expiresAt)}`),
+                ),
+                h('button', {
+                  class: 'btn btn--sm btn--danger',
+                  onClick: async () => {
+                    modal.close();
+                    await act(() => api.revokeDevice(d.deviceId), 'Device signed out.');
+                  },
+                }, 'Sign out'),
+              ))),
+        devices.length > 1
+          ? h('button', {
+              class: 'btn btn--danger btn--block mt-4',
+              onClick: async () => {
+                modal.close();
+                await act(() => api.revokeAllDevices(u.userId), 'All devices signed out.');
+              },
+            }, 'Sign out all devices')
+          : null,
+      );
+    }).catch(e => {
+      mount(slot, h('div', { class: 'banner banner--danger' }, e.message));
+    });
+  }
+
+  function openHistory(u) {
+    const slot = h('div', null, h('div', { class: 'boot-spinner' }));
+    const modal = openModal({
+      title: `${u.name} — history`,
+      body: slot,
+      footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, 'Close')],
+    });
+
+    api.getAuthLog(u.userId, 100).then(res => {
+      const events = res.events || [];
+      mount(slot,
+        events.length === 0
+          ? h('p', { class: 'text-muted text-sm' }, 'Nothing recorded yet.')
+          : h('ul', { class: 'list' },
+              events.map(e => h('li', { class: 'list-item' },
+                h('div', { class: 'list-item__main' },
+                  h('div', { class: 'list-item__title' }, humanEvent(e.eventType)),
+                  h('div', { class: 'list-item__meta' },
+                    `${formatDateTime(e.timestamp)} · ${e.actor}`),
+                )))));
+    }).catch(e => {
+      mount(slot, h('div', { class: 'banner banner--danger' }, e.message));
+    });
+  }
+
+  function render() {
+    const list = visibleUsers();
+    mount(root(),
+      h('div', { class: 'app-layout' },
+        appHeader({
+          title: 'Users',
+          subtitle: `${activeAdmins} active admin${activeAdmins === 1 ? '' : 's'}`,
+          onBack: () => navigate('/admin'),
+          actions: [
+            h('button', {
+              class: 'btn btn--sm btn--ghost',
+              style: { color: 'white' },
+              onClick: openAddUser,
+            }, '+ Add'),
+          ],
+        }),
+        h('main', { class: 'app-body' },
+          h('div', { class: 'page' },
+            h('div', { class: 'filter-bar' },
+              h('input', {
+                class: 'form-input',
+                type: 'search',
+                placeholder: 'Search name or email',
+                value: search,
+                onInput: (e) => { search = e.target.value; renderList(); },
+              }),
+              h('div', { class: 'chip-row mt-2' },
+                FILTERS.map(([key, label]) => h('button', {
+                  class: ['chip', filter === key ? 'chip--active' : ''],
+                  onClick: () => { filter = key; render(); },
+                }, label))),
+            ),
+            listSlot(list),
+          )
+        )
+      )
+    );
+  }
+
+  // Re-rendering the whole page on every keystroke would move focus out of the
+  // search box, so typing only replaces the list.
+  let _listSlot = null;
+  function listSlot(list) {
+    _listSlot = h('div', { class: 'mt-3' });
+    fillList(_listSlot, list);
+    return _listSlot;
+  }
+  function renderList() {
+    if (_listSlot) fillList(_listSlot, visibleUsers());
+  }
+
+  function fillList(slot, list) {
+    if (loading) {
+      mount(slot, h('div', { class: 'empty-state' }, h('div', { class: 'boot-spinner' })));
+      return;
+    }
+    if (error) {
+      mount(slot, h('div', { class: 'banner banner--danger' }, error));
+      return;
+    }
+    if (list.length === 0) {
+      mount(slot, h('div', { class: 'empty-state' },
+        h('div', { class: 'empty-state__icon' }, '○'),
+        h('h2', { class: 'empty-state__title' }, 'No users match'),
+        h('p', { class: 'empty-state__description' }, 'Try a different search or filter.')));
+      return;
+    }
+    mount(slot, h('ul', { class: 'list' },
+      list.map(u => h('li', {
+        class: 'list-item list-item--clickable',
+        onClick: () => openUser(u),
+      },
+        h('div', { class: 'list-item__main' },
+          h('div', { class: 'list-item__title' }, u.name),
+          h('div', { class: 'list-item__meta' }, u.email),
+          h('div', { class: 'badge-row mt-1' }, userBadges(u)),
+          h('div', { class: 'list-item__meta mt-1' },
+            u.lastLoginAt ? `Last sign-in ${formatDateTime(u.lastLoginAt)}` : 'Never signed in',
+            u.deviceCount ? ` · ${u.deviceCount} device${u.deviceCount === 1 ? '' : 's'}` : ''),
+        ),
+        h('span', { class: 'list-item__chevron' }, '›'),
+      ))));
+  }
+
+  render();
+  load();
+}
+
+function detailRow(label, value) {
+  return h('div', { class: 'detail-row' },
+    h('dt', { class: 'detail-row__label' }, label),
+    h('dd', { class: 'detail-row__value' }, value),
+  );
+}
+
+const EVENT_LABELS = {
+  login_succeeded: 'Signed in',
+  login_failed: 'Failed sign-in',
+  account_locked: 'Account locked',
+  account_unlocked: 'Account unlocked',
+  password_set: 'Password set',
+  password_changed: 'Password changed',
+  password_reset: 'Password reset',
+  password_reset_sent: 'Reset link sent',
+  user_created: 'Account created',
+  user_disabled: 'Access disabled',
+  user_enabled: 'Access restored',
+  role_granted: 'Admin rights granted',
+  role_revoked: 'Admin rights removed',
+  device_registered: 'Device registered',
+  device_revoked: 'Device signed out',
+};
+
+function humanEvent(type) {
+  return EVENT_LABELS[type] || type;
 }
 
 // ============================================================
@@ -156,13 +961,27 @@ export function pageAdminList() {
       h('div', { class: 'app-layout' },
         appHeader({
           title: 'Inspections',
-          subtitle: getState().adminLabel || 'Admin',
+          subtitle: (getState().user && getState().user.name) || '',
           actions: [
             h('button', {
               class: 'btn btn--sm btn--ghost',
               style: { color: 'white' },
               onClick: () => navigate('/admin/new'),
             }, '+ New'),
+            isAdmin()
+              ? h('button', {
+                  class: 'btn btn--sm btn--ghost',
+                  style: { color: 'white' },
+                  title: 'Users',
+                  onClick: () => navigate('/admin/users'),
+                }, '👥')
+              : null,
+            h('button', {
+              class: 'btn btn--sm btn--ghost',
+              style: { color: 'white' },
+              title: 'My account',
+              onClick: () => navigate('/profile'),
+            }, '⚙'),
             h('button', {
               class: 'btn btn--sm btn--ghost',
               style: { color: 'white' },
@@ -170,13 +989,11 @@ export function pageAdminList() {
               onClick: async () => {
                 const ok = await confirm({
                   title: 'Sign out?',
-                  message: 'This removes the admin token from this device. You will need to paste it again to sign back in.',
+                  message: 'This device will be signed out. You will need your email and password to sign back in.',
                   confirmLabel: 'Sign out',
                 });
                 if (!ok) return;
-                clearAdminToken();
-                setAuth(null);
-                setState({ authMode: 'none', adminToken: null, adminLabel: null });
+                await authSignOut();
                 navigate('/login');
               },
             }, '⎋'),
@@ -469,12 +1286,12 @@ export async function pageInspectionHome({ params }) {
       );
     });
 
-    const isAdmin = state.authMode === 'admin';
+    const isStaff = state.authMode === 'user';
     const canEdit = ['draft', 'under_review'].indexOf(insp.status) >= 0;
     const canSign = ['locked_for_signature', 'partially_signed'].indexOf(insp.status) >= 0;
 
     let actionButton = null;
-    if (isAdmin && canEdit) {
+    if (isStaff && canEdit) {
       actionButton = h('button', {
         class: 'btn btn--primary bottom-bar__primary',
         disabled: !progress.isReadyForLock || undefined,
@@ -499,7 +1316,7 @@ export async function pageInspectionHome({ params }) {
         appHeader({
           title: insp.propertyAddress || 'Inspection',
           subtitle: `${inspectionTypeLabel(insp.inspectionType)} · ${insp.inspectionId}`,
-          onBack: isAdmin ? () => navigate('/admin') : null,
+          onBack: isStaff ? () => navigate('/admin') : null,
         }),
         h('main', { class: 'app-body app-body--has-bottom-bar' },
           h('div', { class: 'page' },
@@ -926,13 +1743,13 @@ export async function pageSign({ params }) {
 
   const state = getState();
   const insp = state.inspection;
-  const isAdmin = state.authMode === 'admin';
+  const isStaff = state.authMode === 'user';
   const isTenant = state.authMode === 'tenant';
 
   // Determine which role this user can sign as
   // Admin can sign as anyone; tenant can only sign as 'tenant'
   let availableRoles;
-  if (isAdmin) {
+  if (isStaff) {
     availableRoles = ['landlord', 'tenant'];
   } else if (isTenant) {
     availableRoles = ['tenant'];
@@ -959,7 +1776,7 @@ export async function pageSign({ params }) {
             h('div', { class: 'banner banner--success' },
               h('div', { class: 'banner__icon' }, '✓'),
               h('div', { class: 'banner__body' }, 'You have signed. Awaiting other party.')),
-            isAdmin ? h('button', { class: 'btn btn--primary mt-4', onClick: () => navigate('/admin/inspection/' + inspectionId) }, 'Back to admin') : null,
+            isStaff ? h('button', { class: 'btn btn--primary mt-4', onClick: () => navigate('/admin/inspection/' + inspectionId) }, 'Back to admin') : null,
           )
         )
       )
@@ -1131,7 +1948,7 @@ export async function pageSign({ params }) {
 
     if (newStatus === 'signed') {
       // All signatures collected
-      if (isAdmin) {
+      if (isStaff) {
         await offerFinalize(inspectionId);
       } else {
         navigate(`/inspection/${inspectionId}/success`);
@@ -1209,7 +2026,7 @@ export async function pageSuccess({ params }) {
     return showError('Could not load inspection', e.message);
   }
   const insp = data.inspection;
-  const isAdmin = getState().authMode === 'admin';
+  const isStaff = getState().authMode === 'user';
 
   let finalizing = false;
 
@@ -1237,7 +2054,7 @@ export async function pageSuccess({ params }) {
       h('div', { class: 'app-layout' },
         appHeader({
           title: 'Inspection complete',
-          onBack: isAdmin ? () => navigate('/admin') : null,
+          onBack: isStaff ? () => navigate('/admin') : null,
         }),
         h('main', { class: 'app-body' },
           h('div', { class: 'page' },
@@ -1255,7 +2072,7 @@ export async function pageSuccess({ params }) {
                   target: '_blank',
                   rel: 'noopener noreferrer',
                 }, 'Open final PDF')
-              : isAdmin
+              : isStaff
                 ? h('button', {
                     class: 'btn btn--primary btn--block mt-4',
                     disabled: finalizing || undefined,
@@ -1265,7 +2082,7 @@ export async function pageSuccess({ params }) {
                     h('div', { class: 'banner__icon' }, 'i'),
                     h('div', { class: 'banner__body' }, 'The landlord will finalize the report shortly.')),
 
-            isAdmin
+            isStaff
               ? h('button', { class: 'btn btn--secondary btn--block mt-3', onClick: () => navigate('/admin') },
                   'Back to inspections')
               : null,

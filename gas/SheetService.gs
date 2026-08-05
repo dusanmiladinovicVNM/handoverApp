@@ -340,6 +340,19 @@ const SheetService = (function () {
     return all.filter(e => e.inspectionId === inspectionId);
   }
 
+  /**
+   * Account and sign-in events — the rows with no inspection attached.
+   *
+   * Reads the whole log and filters in memory, which is fine at this scale but
+   * will not stay that way forever. When the log grows past comfort, this is
+   * the function to move onto its own sheet.
+   */
+  function getAuthAuditEvents() {
+    return _getAllRows('AuditLog')
+      .map(r => _rowToObject('AuditLog', r))
+      .filter(e => !e.inspectionId);
+  }
+
   // ============================================================
   // Schemas
   // ============================================================
@@ -423,6 +436,10 @@ const SheetService = (function () {
     return all.filter(d => d.userId === userId && (includeRevoked || !d.revokedAt));
   }
 
+  function listDevices() {
+    return _getAllRows('Devices').map(r => _rowToObject('Devices', r));
+  }
+
   /**
    * Revoke every active device of one user in a single pass.
    * Used on password change and when an account is disabled.
@@ -477,6 +494,7 @@ const SheetService = (function () {
     // Audit
     appendAuditEvent,
     getAuditEventsForInspection,
+    getAuthAuditEvents,
     // Schemas
     getActiveSchemas,
     getSchema,
@@ -492,6 +510,7 @@ const SheetService = (function () {
     getDevice,
     updateDevice,
     getDevicesForUser,
+    listDevices,
     revokeDevicesForUser,
   };
 })();

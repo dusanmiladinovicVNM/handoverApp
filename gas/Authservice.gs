@@ -370,6 +370,27 @@ const AuthService = (function () {
     }
   }
 
+  /**
+   * Any signed-in member of staff — admin or inspector — but not a tenant.
+   *
+   * Before accounts existed there were only two kinds of caller, so "not a
+   * tenant" and "admin" were the same test and requireAdmin did both jobs.
+   * With a second staff role the two come apart: an inspector doing fieldwork
+   * needs to list, edit and finalise inspections, and gating that on admin
+   * would leave the role able to sign in and do nothing at all.
+   *
+   * What stays admin-only is supervisory: reopening a signed inspection,
+   * reading the audit log, and managing accounts.
+   *
+   * This says nothing about *which* inspections. That is phase 3, where
+   * assignedTo starts narrowing the list.
+   */
+  function requireStaff(authCtx) {
+    if (!authCtx || authCtx.role === 'tenant') {
+      throw new HandoverError('FORBIDDEN', 'This action requires a staff account.');
+    }
+  }
+
   function requireMatchingInspection(authCtx, inspectionId) {
     if (authCtx.role === 'tenant' && authCtx.inspectionId !== inspectionId) {
       throw new HandoverError('FORBIDDEN', 'Token not valid for this inspection.');
@@ -417,6 +438,7 @@ const AuthService = (function () {
     resolveAuth,
     // Permissions
     requireAdmin,
+    requireStaff,
     requireMatchingInspection,
     requireMatchingRole,
     // Legacy management

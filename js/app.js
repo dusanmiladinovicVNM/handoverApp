@@ -3,18 +3,24 @@
  * Main entry point. Resolves auth, registers routes, starts the router.
  *
  * Auth flow:
- *  - URL has ?t=<token> → tenant flow
- *  - localStorage has admin token → admin flow
- *  - Neither → login page (paste admin token)
+ *  - URL has ?t=<token> → tenant flow, unchanged
+ *  - #/set-password → no auth at all; the link is the credential
+ *  - stored session or device token → signed-in account
+ *  - stored legacy admin token → still accepted during the transition
+ *  - none of the above → sign-in page
  */
 
 import * as Router from './router.js';
-import { setAuth, api } from './api.js';
-import { setState, getState } from './state.js';
-import { loadAdminToken, loadAdminLabel, clearAdminToken } from './auth.js';
+import { setAuth } from './api.js';
+import { setState, getState, isAdmin } from './state.js';
+import { restoreSession } from './auth.js';
 import {
   pageHome,
-  pageAdminLogin,
+  pageLogin,
+  pageSetPassword,
+  pageForgotPassword,
+  pageProfile,
+  pageAdminUsers,
   pageAdminList,
   pageAdminNew,
   pageAdminDetail,
@@ -53,30 +59,13 @@ async function boot() {
       tenantToken,
       tenantInspectionId: match ? match[1] : null,
     });
+  } else if (route.path === '/set-password') {
+    // The link in the mail is the credential. Restoring a session first would
+    // be pointless, and worse: whoever follows a reset link is often the person
+    // whose stored session no longer works.
+    setState({ authMode: 'none' });
   } else {
-    const savedToken = loadAdminToken();
-    if (savedToken) {
-      setAuth({ type: 'token', token: savedToken });
-      try {
-        await api.getSchemas();
-        setState({
-          authMode: 'admin',
-          adminToken: savedToken,
-          adminLabel: loadAdminLabel(),
-        });
-      } catch (e) {
-        clearAdminToken();
-        setAuth(null);
-        setState({
-          authMode: 'none',
-          authError: e.code === 'UNAUTHORIZED'
-            ? 'Saved admin token is invalid or expired. Paste a new one.'
-            : e.message,
-        });
-      }
-    } else {
-      setState({ authMode: 'none' });
-    }
+    await restoreSession();
   }
 
   registerRoutes();
@@ -89,10 +78,14 @@ async function boot() {
 
 function registerRoutes() {
   Router.route('/', pageHome);
-  Router.route('/login', pageAdminLogin);
-  Router.route('/admin', requireAdmin(pageAdminList));
-  Router.route('/admin/new', requireAdmin(pageAdminNew));
-  Router.route('/admin/inspection/:id', requireAdmin(pageAdminDetail));
+  Router.route('/login', pageLogin);
+  Router.route('/set-password', pageSetPassword);
+  Router.route('/forgot-password', pageForgotPassword);
+  Router.route('/profile', requireUser(pageProfile));
+  Router.route('/admin', requireUser(pageAdminList));
+  Router.route('/admin/users', requireAdmin(pageAdminUsers));
+  Router.route('/admin/new', requireUser(pageAdminNew));
+  Router.route('/admin/inspection/:id', requireUser(pageAdminDetail));
 
   Router.route('/inspection/:id', pageInspectionHome);
   Router.route('/inspection/:id/section/:sectionId', pageInspectionSection);
@@ -117,10 +110,31 @@ function registerRoutes() {
   });
 }
 
+/**
+ * Route guards. These decide what to *render*, not what is allowed — the
+ * server re-reads the role from the Users sheet on every request and is the
+ * only thing standing between a user and an action. Hiding a screen is a
+ * courtesy to the person, not a control on them.
+ */
+function requireUser(handler) {
+  return (ctx) => {
+    if (getState().authMode !== 'user') {
+      Router.navigate('/login', true);
+      return;
+    }
+    handler(ctx);
+  };
+}
+
 function requireAdmin(handler) {
   return (ctx) => {
-    if (getState().authMode !== 'admin') {
+    const state = getState();
+    if (state.authMode !== 'user') {
       Router.navigate('/login', true);
+      return;
+    }
+    if (!isAdmin()) {
+      Router.navigate('/admin', true);
       return;
     }
     handler(ctx);

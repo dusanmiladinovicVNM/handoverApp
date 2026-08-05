@@ -14,6 +14,7 @@ const suites = [
   ['Passwords', require('./password.test')],
   ['Tokens and authorization', require('./auth.test')],
   ['Sign-in flows', require('./account.test')],
+  ['Account administration', require('./user-admin.test')],
 ];
 
 for (const [name, run] of suites) {

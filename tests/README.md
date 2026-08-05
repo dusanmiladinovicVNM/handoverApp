@@ -27,6 +27,7 @@ every request rather than trusted from the token.
 | `password.test.js` | PBKDF2 output, checked against `crypto.pbkdf2Sync` |
 | `auth.test.js` | Token issuing and resolution, revocation, forgery, the tenant flow |
 | `account.test.js` | Login, lockout, account enumeration, password set/change/reset, refresh |
+| `user-admin.test.js` | The admin screen's actions, the guardrails, and who is refused |
 
 Four of these matter more than the rest, because each protects something that
 would keep *looking* correct after it broke:
@@ -54,6 +55,15 @@ token expires.
 a wrong password and a locked account must all read identically. Any one of
 them drifting to its own message turns the login form into a way to enumerate
 who works here.
+
+**The guardrails.** Nothing stops the last administrator being disabled except
+an explicit check, and the failure only shows up when there is no one left to
+undo it. These are also exactly the checks that look redundant a year later.
+
+One trap worth knowing if you extend `user-admin.test.js`: an `authCtx` is a
+snapshot taken when a token is resolved. A real request builds a fresh one per
+call, so a test that changes a role and then reuses an old context is testing
+the snapshot, not the rule. Re-resolve the token instead.
 
 ## Scope
 

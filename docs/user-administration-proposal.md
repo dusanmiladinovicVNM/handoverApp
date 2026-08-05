@@ -576,10 +576,27 @@ Merenje iz koraka 3 nije formalnost — na ovom deploymentu je pokazalo da je
 prvobitna procena bila pogrešna za red veličine, i zbog toga je minimalna dužina
 lozinke podignuta sa 12 na 16 znakova. Vidi sekciju 5.
 
-**Faza 2 — ekran i prelazak ljudi**
-`/admin/users`, novi ekran za prijavu, ekran za postavljanje lozinke. Upisati
-prave korisnike, poslati linkove. Svi prelaze na novu prijavu. Stari token i
-dalje radi kao mreža za pad.
+**Faza 2 — ekran i prelazak ljudi** ✅ *urađeno*
+`/admin/users` sa svim akcijama i zaštitnim ogradama iz sekcije 10, novi ekran
+za prijavu (`/login`), postavljanje lozinke (`/set-password`), zaboravljena
+lozinka (`/forgot-password`) i sopstveni nalog (`/profile`). Stari admin token
+i dalje radi kao mreža za pad.
+
+Jedna stvar je morala da se doda van opisanog obima. Serverski su
+`listInspections`, `createInspection`, `lockInspection`,
+`regenerateTenantToken`, `deleteAttachment` i `finalizeInspection` tražili
+`requireAdmin` — što je bilo tačno dok su postojale samo dve vrste pozivaoca,
+admin i stanar. Sa ulogom `inspector` to više ne stoji: inspektor bi se
+prijavio i **ne bi video nijednu inspekciju**, pa bi uloga koju admin dodeljuje
+bila prazna. Uveden je `AuthService.requireStaff` — svako prijavljen ko nije
+stanar. Admin ostaje potreban za nadzorne radnje: ponovno otvaranje potpisane
+inspekcije, audit log i upravljanje nalozima.
+
+To ne govori ništa o tome **koje** inspekcije inspektor vidi. To je faza 3.
+
+Preostalo za pokretanje: dozvola `script.send_mail` (potrebna za pozivnice
+novim korisnicima) i `FRONTEND_URL` sa tačnim velikim i malim slovima, jer isti
+podatak gradi i linkove za stanare.
 
 **Faza 3 — čišćenje i zatvaranje vidljivosti**
 Uključiti filtriranje po `assignedTo` (do tada svi vide sve, da prelazak ne bi

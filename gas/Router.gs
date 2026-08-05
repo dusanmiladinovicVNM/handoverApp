@@ -27,6 +27,19 @@ const Router = (function () {
     'me': (authCtx, data) => AccountService.me(authCtx, data),
     'signOut': (authCtx, data) => AccountService.signOut(authCtx, data),
 
+    // --- Account administration (admin only, enforced in the service) ---
+    'listUsers': (authCtx, data) => UserAdminService.listUsers(authCtx, data),
+    'createUser': (authCtx, data) => UserAdminService.createUser(authCtx, data),
+    'setUserStatus': (authCtx, data) => UserAdminService.setUserStatus(authCtx, data),
+    'setUserRole': (authCtx, data) => UserAdminService.setUserRole(authCtx, data),
+    'unlockUser': (authCtx, data) => UserAdminService.unlockUser(authCtx, data),
+    'sendPasswordLink': (authCtx, data) => UserAdminService.sendPasswordLink(authCtx, data),
+    'listUserDevices': (authCtx, data) => UserAdminService.listUserDevices(authCtx, data),
+    'revokeDevice': (authCtx, data) => UserAdminService.revokeDevice(authCtx, data),
+    'revokeAllDevices': (authCtx, data) => UserAdminService.revokeAllDevices(authCtx, data),
+    'getAuthLog': (authCtx, data) => UserAdminService.getAuthLog(authCtx, data),
+    'assignInspection': (authCtx, data) => UserAdminService.assignInspection(authCtx, data),
+
     // --- Schemas ---
     'getSchemas': (authCtx, data) => {
       AuthService.requireAdmin(authCtx);

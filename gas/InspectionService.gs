@@ -7,7 +7,7 @@
 const InspectionService = (function () {
 
   function createInspection(authCtx, data) {
-    AuthService.requireAdmin(authCtx);
+    AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionType', 'string');
     Utils.requireField(data, 'schemaId', 'string');
     Utils.requireField(data, 'property', 'object');
@@ -235,7 +235,7 @@ const InspectionService = (function () {
   }
 
   function lockInspection(authCtx, data) {
-    AuthService.requireAdmin(authCtx);
+    AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionId', 'string');
 
     const inspection = SheetService.getInspection(data.inspectionId);
@@ -299,7 +299,7 @@ const InspectionService = (function () {
   }
 
   function regenerateTenantToken(authCtx, data) {
-    AuthService.requireAdmin(authCtx);
+    AuthService.requireStaff(authCtx);
     Utils.requireField(data, 'inspectionId', 'string');
 
     const inspection = SheetService.getInspection(data.inspectionId);
@@ -329,7 +329,7 @@ const InspectionService = (function () {
   }
 
   function listInspections(authCtx, data) {
-    AuthService.requireAdmin(authCtx);
+    AuthService.requireStaff(authCtx);
     const filter = (data && data.filter) || {};
     const all = SheetService.listInspections(filter);
 
