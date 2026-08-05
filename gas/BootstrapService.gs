@@ -149,75 +149,6 @@ function generateSecret() {
 }
 
 /**
- * DEPRECATED — use bootstrapFirstAdmin() instead.
- *
- * Kept only so that anyone already holding one of these tokens is not locked
- * out while accounts are being rolled out. Removed in phase 3, along with the
- * ADMIN_NONCES property. Do not issue new ones: a token minted here belongs to
- * no person, expires in a year, and can only be revoked from this editor.
- *
- * EDIT THE LABEL below to identify the device/person before running.
- *
- * Steps:
- *   1. Edit the LABEL below.
- *   2. Run this function in the Apps Script editor.
- *   3. View Logs (Ctrl+Enter or View → Logs).
- *   4. Copy the token from the log.
- *   5. Open the frontend app — paste token when prompted.
- *
- * To revoke a token later, run listAdminTokens() to find its nonce, then
- * revokeAdminTokenByNonce('the-nonce').
- */
-function generateAdminTokenForMe() {
-  const LABEL = 'Dušan main device';   // ← EDIT THIS
-  const TTL_HOURS = 24 * 365;          // 1 year
-
-  const token = AuthService.generateAdminToken(TTL_HOURS, LABEL);
-  Logger.log('=========================================');
-  Logger.log('ADMIN TOKEN GENERATED');
-  Logger.log('Label: ' + LABEL);
-  Logger.log('TTL hours: ' + TTL_HOURS);
-  Logger.log('Token (copy everything between the lines):');
-  Logger.log('-----------------------------------------');
-  Logger.log(token);
-  Logger.log('-----------------------------------------');
-  Logger.log('Now open the frontend app and paste this token when prompted.');
-  Logger.log('=========================================');
-}
-
-/**
- * List all currently valid admin tokens.
- * Run in Apps Script editor to see who has access.
- */
-function listAdminTokens() {
-  const list = AuthService.listAdminTokens();
-  if (list.length === 0) {
-    Logger.log('No admin tokens. Run generateAdminTokenForMe() first.');
-    return;
-  }
-  Logger.log(`${list.length} admin token(s):`);
-  list.forEach((t, i) => {
-    Logger.log(`  ${i + 1}. label="${t.label}" nonce=${t.nonce}`);
-    Logger.log(`     created=${t.createdAt} expires=${t.expiresAt}`);
-  });
-}
-
-/**
- * Revoke an admin token by its nonce.
- * Get the nonce from listAdminTokens().
- *
- *   revokeAdminTokenByNonce('a7f3b2c1d4e5f6a7');
- */
-function revokeAdminTokenByNonce(nonce) {
-  if (!nonce) {
-    Logger.log('Pass the nonce as argument: revokeAdminTokenByNonce("...")');
-    return;
-  }
-  const removed = AuthService.revokeAdminToken(nonce);
-  Logger.log(removed ? 'Token revoked.' : 'Nonce not found — already revoked?');
-}
-
-/**
  * Verify that every service made it into the project intact.
  *
  * Run this after copying files by hand. Files are moved one at a time, and a
@@ -465,6 +396,38 @@ function smokeTest() {
   }
 }
 
+
+/**
+ * Delete the leftover ADMIN_NONCES property.
+ *
+ * Nothing reads it any more — tokens of the old shape are refused by
+ * resolveAuth whatever the list says, so this is tidying rather than a fix.
+ * Run it once after this version is deployed and everyone signs in with an
+ * account.
+ *
+ * Worth stating plainly, because it is easy to assume otherwise: deleting the
+ * property does not un-publish the admin token that was committed to this
+ * public repository. What makes that token useless is the code that no longer
+ * accepts its shape. The property is just the last trace of the mechanism.
+ */
+function removeLegacyAdminTokens() {
+  const props = PropertiesService.getScriptProperties();
+  const raw = props.getProperty('ADMIN_NONCES');
+  if (!raw) {
+    Logger.log('ADMIN_NONCES is already gone. Nothing to do.');
+    return;
+  }
+  let count = 0;
+  try {
+    const parsed = JSON.parse(raw);
+    count = Array.isArray(parsed) ? parsed.length : 0;
+  } catch (e) {
+    count = 0;
+  }
+  props.deleteProperty('ADMIN_NONCES');
+  Logger.log(`Removed ADMIN_NONCES (${count} entr${count === 1 ? 'y' : 'ies'}).`);
+  Logger.log('Tokens of that shape were already being refused by resolveAuth.');
+}
 
 /**
  * Highest NNNNNN currently used on a sheet, for IDs of the form PRE-YYYY-NNNNNN.

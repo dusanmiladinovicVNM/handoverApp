@@ -194,16 +194,16 @@ module.exports = function run() {
     UserAdminService.setUserStatus(second, { userId: admin.userId, status: 'active' });
   });
 
-  check('a legacy admin token is still held to the last-admin rule', () => {
-    // It has no userId, so the self-checks cannot fire for it. The rule that
-    // keeps at least one administrator alive has to hold on its own.
-    const legacy = AuthService.resolveAuth({
-      type: 'token', token: AuthService.generateAdminToken(24, 'old device'),
-    });
-    UserAdminService.setUserRole(legacy, { userId: second.userId, role: 'inspector' });
-    rejects(() => UserAdminService.setUserRole(legacy, {
+  // The self-checks refuse an admin acting on their own row, so they cannot be
+  // what keeps the last administrator alive — one admin demoting *another* is
+  // allowed right up to the point where none is left. This is the rule that
+  // catches that, tested through a second account rather than through self.
+  check('the last-admin rule holds even when the actor is someone else', () => {
+    UserAdminService.setUserRole(admin, { userId: second.userId, role: 'inspector' });
+    assert(UserService.countActiveAdmins() === 1, 'setup: expected one admin left');
+    rejects(() => UserAdminService.setUserRole(second, {
       userId: admin.userId, role: 'inspector',
-    }), 'a legacy token demoted the last administrator');
+    }), 'the last administrator was demoted by a colleague');
     UserAdminService.setUserRole(admin, { userId: second.userId, role: 'admin' });
   });
 

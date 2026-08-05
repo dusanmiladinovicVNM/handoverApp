@@ -45,7 +45,12 @@ const Router = (function () {
       AuthService.requireAdmin(authCtx);
       return { schemas: SchemaService.listActiveSchemas() };
     },
+    // Staff only. It used to accept any valid token, which let a tenant link
+    // pull any schema by id — a small leak, but a pointless one: a tenant
+    // already receives the schema for their own inspection inside
+    // getInspection, and has no use for the others.
     'getSchema': (authCtx, data) => {
+      AuthService.requireStaff(authCtx);
       Utils.requireField(data, 'schemaId', 'string');
       return {
         schemaId: data.schemaId,

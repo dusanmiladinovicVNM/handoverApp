@@ -1026,6 +1026,12 @@ export function pageAdminList() {
                           i.tenantName || '(no tenant)', ' · ',
                           formatDate(i.updatedAt),
                         ),
+                        // Shown to admins only. An inspector's list will soon
+                        // contain nothing but their own work, where repeating
+                        // their name on every row says nothing.
+                        isAdmin() && i.assignedTo
+                          ? h('div', { class: 'list-item__meta' }, 'Assigned to ', i.assignedTo)
+                          : null,
                         h('div', { class: 'list-item__meta text-mono' }, i.inspectionId),
                       ))
                     )
@@ -1059,6 +1065,7 @@ export function pageAdminList() {
 
 export function pageAdminNew() {
   let schemas = [];
+  let assignableUsers = [];
   let loading = true;
   let submitting = false;
   let form = {
@@ -1070,6 +1077,7 @@ export function pageAdminNew() {
       tenant: { name: '', email: '', phone: '' },
     },
     notes: '',
+    assignedTo: '',
   };
 
   async function load() {
@@ -1078,10 +1086,20 @@ export function pageAdminNew() {
       schemas = res.schemas || [];
     } catch (e) {
       toastError(e.message);
-    } finally {
-      loading = false;
-      render();
     }
+    // listUsers is admin-only, so this is not attempted otherwise — and its
+    // failure must not stop an inspection being created. Without the list the
+    // form simply assigns to whoever is filling it in.
+    if (isAdmin()) {
+      try {
+        const res = await api.listUsers();
+        assignableUsers = (res.users || []).filter(u => u.status === 'active');
+      } catch (e) {
+        assignableUsers = [];
+      }
+    }
+    loading = false;
+    render();
   }
 
   async function submit() {
@@ -1200,6 +1218,26 @@ export function pageAdminNew() {
                   partyFields(form.parties.tenant),
 
                   h('hr', { style: { border: 'none', borderTop: '1px solid var(--color-border)', margin: '1rem 0' }}),
+
+                  // Only admins see this. An inspector creating their own job
+                  // is implicitly its owner, and offering them a list of
+                  // colleagues to hand it to would be a permission they do not
+                  // have.
+                  isAdmin()
+                    ? h('div', { class: 'form-group' },
+                        h('label', { class: 'form-label' }, 'Assign to'),
+                        h('select', {
+                          class: 'form-select',
+                          onChange: (e) => { form.assignedTo = e.target.value; },
+                        },
+                          h('option', { value: '' }, 'Me'),
+                          assignableUsers.map(u => h('option', { value: u.email }, `${u.name} (${u.email})`)),
+                        ),
+                        h('p', { class: 'form-hint text-xs text-muted' },
+                          'Who will carry out this inspection. Can be changed later.'),
+                      )
+                    : null,
+
                   h('div', { class: 'form-group' },
                     h('label', { class: 'form-label' }, 'Internal notes (optional)'),
                     h('textarea', {
@@ -2098,6 +2136,62 @@ export async function pageSuccess({ params }) {
 // pageAdminDetail — admin view of one inspection (read-only summary + actions)
 // ============================================================
 
+/**
+ * Hand an inspection to someone else.
+ *
+ * This is what makes ownership editable at all. `createdBy` records who typed
+ * the inspection in, which is routinely not the person who goes out to do it —
+ * so without a way to set `assignedTo` afterwards, an inspection opened by the
+ * office would be stranded the moment visibility starts following that column.
+ */
+function openAssign(inspectionId, currentEmail) {
+  const slot = h('div', null, h('div', { class: 'boot-spinner' }));
+  const modal = openModal({
+    title: 'Assign inspection',
+    body: slot,
+    footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, 'Cancel')],
+  });
+
+  api.listUsers().then(res => {
+    const users = (res.users || []).filter(u => u.status === 'active');
+    if (users.length === 0) {
+      mount(slot, h('p', { class: 'text-muted text-sm' }, 'No active users to assign to.'));
+      return;
+    }
+    mount(slot,
+      h('p', { class: 'text-muted text-sm' }, 'Who will carry out this inspection.'),
+      h('ul', { class: 'list mt-3' },
+        users.map(u => h('li', {
+          class: 'list-item list-item--clickable',
+          onClick: async () => {
+            modal.close();
+            try {
+              await api.assignInspection(inspectionId, u.email);
+              toastSuccess(`Assigned to ${u.name}.`);
+              // Reload rather than patch local state: the server normalises the
+              // address, and showing anything else would be a small lie about
+              // what was stored.
+              const data = await api.getInspection(inspectionId);
+              setInspectionData(data);
+              navigate('/admin/inspection/' + inspectionId, true);
+            } catch (e) {
+              toastError(e.message);
+            }
+          },
+        },
+          h('div', { class: 'list-item__main' },
+            h('div', { class: 'list-item__title' }, u.name),
+            h('div', { class: 'list-item__meta' }, u.email),
+          ),
+          u.email === currentEmail
+            ? h('span', { class: 'badge badge--info' }, 'Current')
+            : h('span', { class: 'list-item__chevron' }, '›'),
+        ))));
+  }).catch(e => {
+    mount(slot, h('div', { class: 'banner banner--danger' }, e.message));
+  });
+}
+
 export async function pageAdminDetail({ params }) {
   const inspectionId = params.id;
   showSpinner('Loading…');
@@ -2136,6 +2230,17 @@ export async function pageAdminDetail({ params }) {
                 h('div', null, h('strong', null, 'Tenant: '), i.tenantName, ' (', i.tenantEmail || 'no email', ')'),
                 h('div', null, h('strong', null, 'Landlord: '), i.landlordName),
                 h('div', null, h('strong', null, 'Created: '), formatDate(i.createdAt), ' by ', i.createdBy || 'unknown'),
+                h('div', null,
+                  h('strong', null, 'Assigned to: '),
+                  i.assignedTo || h('span', { class: 'text-muted' }, 'nobody'),
+                  isAdmin()
+                    ? h('button', {
+                        class: 'btn btn--sm btn--ghost',
+                        style: { marginLeft: 'var(--space-2)' },
+                        onClick: () => openAssign(inspectionId, i.assignedTo),
+                      }, 'Change')
+                    : null,
+                ),
               ),
             ),
 

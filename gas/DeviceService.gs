@@ -3,9 +3,9 @@
  * Remembered devices — this is what "stay signed in" is made of, and what the
  * admin screen's "sign this device out" acts on.
  *
- * Replaces the ADMIN_NONCES list in Script Properties: same job (a revocation
- * list checked on every request), but tied to a person, with a name, a history
- * and an expiry.
+ * This replaced the ADMIN_NONCES list that used to live in Script Properties:
+ * same job — a revocation list checked on every request — but tied to a person,
+ * with a name, a history and an expiry.
  *
  * Revoking a row here is the single mechanism behind three separate promises:
  * signing out one device, disabling an account, and ending every session when

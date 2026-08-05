@@ -240,23 +240,16 @@ const AccountService = (function () {
     };
   }
 
+  /**
+   * The signed-in account. Every context that reaches here now has a user
+   * behind it, so a caller without one — a tenant link, for instance — is
+   * asking a question that has no answer rather than one worth inventing.
+   */
   function me(authCtx) {
-    if (authCtx.userId) {
-      return { user: UserService.toPublic(UserService.getById(authCtx.userId)), legacy: false };
+    if (!authCtx || !authCtx.userId) {
+      throw new HandoverError('FORBIDDEN', 'This token does not belong to an account.');
     }
-    // A legacy admin token has no user record behind it. Reported plainly so
-    // the frontend can tell the holder to move to a real account.
-    return {
-      user: {
-        userId: '',
-        email: '',
-        name: authCtx.adminLabel || 'Legacy admin token',
-        role: 'admin',
-        status: 'active',
-        hasPassword: false,
-      },
-      legacy: true,
-    };
+    return { user: UserService.toPublic(UserService.getById(authCtx.userId)) };
   }
 
   function signOut(authCtx) {

@@ -286,17 +286,13 @@ module.exports = function run() {
     const result = login('bob@firma.rs', PASSWORD);
     const ctx = AuthService.resolveAuth({ type: 'token', token: result.sessionToken });
     const me = AccountService.me(ctx);
-    assert(me.user.email === 'bob@firma.rs' && me.legacy === false, 'wrong identity reported');
+    assert(me.user.email === 'bob@firma.rs', `wrong identity: ${me.user.email}`);
+    assert(me.user.role === 'inspector', `wrong role: ${me.user.role}`);
   });
 
-  check('me() flags a legacy admin token as such', () => {
-    const ctx = AuthService.resolveAuth({
-      type: 'token', token: AuthService.generateAdminToken(24, 'old device'),
-    });
-    const me = AccountService.me(ctx);
-    assert(me.legacy === true, 'a legacy token was not flagged');
-    assert(me.user.role === 'admin', 'a legacy token lost its admin role');
-  });
+  check('me() refuses a context with no account behind it', () =>
+    rejects(() => AccountService.me({ role: 'tenant', isAdmin: false }),
+      'a tenant link was told about an account'));
 
   section('Audit trail:');
 
