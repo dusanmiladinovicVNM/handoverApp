@@ -31,6 +31,11 @@ function fakeSpreadsheet(data, counters) {
       getValues() {
         counters.reads++;
         counters.readsBySheet[name] = (counters.readsBySheet[name] || 0) + 1;
+        // The shape matters as much as the count: a narrow read is the whole
+        // point of the heavy-sheet path, and a wide one would still be one
+        // round trip.
+        (counters.shapesBySheet[name] = counters.shapesBySheet[name] || [])
+          .push({ rows: numRows, cols: numCols });
         const out = [];
         for (let r = row - 1; r < row - 1 + numRows; r++) {
           out.push((data[name][r] || []).slice(col - 1, col - 1 + numCols));
@@ -71,11 +76,17 @@ function fakeSpreadsheet(data, counters) {
 
 /** A fresh SheetService, as if a new request had just started. */
 function loadSheetService(data) {
-  const counters = { reads: 0, writes: 0, readsBySheet: {} };
+  const counters = {
+    reads: 0, writes: 0, readsBySheet: {}, shapesBySheet: {}, schemasInvalidated: [],
+  };
 
   const ctx = vm.createContext({
     SpreadsheetApp: fakeSpreadsheet(data, counters),
     Config: { getWorkbookId: () => 'fake-workbook' },
+    // upsertSchema reaches across to drop the cached form definition. Recorded
+    // rather than stubbed away, because that hand-off is the thing keeping the
+    // two caches from disagreeing.
+    SchemaService: { invalidate: (ids) => { counters.schemasInvalidated.push(ids); } },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     Utilities: { getUuid: () => '00000000-0000-4000-8000-000000000000' },
     PropertiesService: {
@@ -112,6 +123,14 @@ function seed() {
        '2026-01-01', '2030-01-01', '', '', 'test'],
       ['DEV-2026-000002', 'USR-2026-000002', 'Mac', 'n2', '2026-01-01',
        '2026-01-01', '2030-01-01', '', '', 'test'],
+    ],
+    // Two rows, each carrying a form definition, which is what makes this
+    // sheet the one worth reading narrowly.
+    Schemas: [
+      ['schemaId', 'inspectionType', 'version', 'active', 'title', 'schemaJson',
+       'createdAt', 'updatedAt'],
+      ['SCH-1', 'movein', 1, true, 'One', '{"sections":[]}', '2026-01-01', '2026-01-01'],
+      ['SCH-2', 'moveout', 1, true, 'Two', '{"sections":[]}', '2026-01-01', '2026-01-01'],
     ],
   };
 }
@@ -150,6 +169,47 @@ module.exports = function run() {
     const after = counters.reads;
     SheetService.listUsers();
     assert(counters.reads === after, 'listUsers went back to the sheet');
+  });
+
+  section('A heavy sheet is read narrowly:');
+
+  check('a schema lookup does not pull every form definition', () => {
+    // Reading all rows is the right trade for a narrow sheet and the wrong one
+    // here: schemaJson is a whole form per row, so one lookup moved every
+    // schema in the workbook. The narrow path reads the key column, then the
+    // one row — two round trips, a fraction of the bytes.
+    const { SheetService, counters } = loadSheetService(seed());
+    SheetService.getSchema('SCH-2');
+
+    const shapes = counters.shapesBySheet.Schemas;
+    assert(shapes.length === 2,
+      `${shapes.length} read(s), expected the key column and then one row`);
+    assert(shapes[0].cols === 1, `the first read asked for ${shapes[0].cols} columns, not the key`);
+    assert(shapes[1].rows === 1, `the second read asked for ${shapes[1].rows} rows, not one`);
+  });
+
+  check('and it still finds the right row', () => {
+    const { SheetService } = loadSheetService(seed());
+    assert(SheetService.getSchema('SCH-2').title === 'Two', 'the wrong row came back');
+    assert(SheetService.getSchema('SCH-NOPE') === null, 'a phantom schema appeared');
+  });
+
+  check('once the rows are in hand, the narrow path is skipped', () => {
+    // getActiveSchemas has already paid for every row. Going narrow after that
+    // would be a round trip to avoid bytes that have already been moved.
+    const { SheetService, counters } = loadSheetService(seed());
+    SheetService.getActiveSchemas();
+    const after = counters.reads;
+    SheetService.getSchema('SCH-1');
+    assert(counters.reads === after, 'a cached sheet was read again');
+  });
+
+  check('writing a schema drops the cached definition', () => {
+    const { SheetService, counters } = loadSheetService(seed());
+    SheetService.upsertSchema({ schemaId: 'SCH-1', title: 'Renamed' });
+    assert(counters.schemasInvalidated.length === 1,
+      'the form definition would have outlived the write by six hours');
+    assert(counters.schemasInvalidated[0] === 'SCH-1', 'the wrong schema was dropped');
   });
 
   section('Writes make the cache tell the truth again:');

@@ -90,11 +90,18 @@ function _recordIfSlow(timing) {
   try {
     const threshold = Config.getSlowRequestMs();
     if (threshold > 0 && timing.totalMs < threshold) return;
+    // Where the handler's time actually went. Without this the row says four
+    // seconds and leaves the reader to guess between opening the workbook, the
+    // round trips after it, and the handler's own work.
+    const sheets = SheetService.getStats();
     AuditService.logAuth(timing.actor, 'slow_request', {
       action: timing.action,
       authMs: timing.authMs,
       handlerMs: timing.handlerMs,
       totalMs: timing.totalMs,
+      openMs: sheets.openMs,
+      reads: sheets.reads,
+      readMs: sheets.readMs,
     });
   } catch (e) {
     // Diagnostics must never be able to fail a request that has already

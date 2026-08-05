@@ -139,6 +139,16 @@ function loadInitialSchemas() {
 }
 
 /**
+ * Forget the cached schema JSON. upsertSchema already does this, so the only
+ * reason to run it by hand is an edit typed straight into the Schemas sheet.
+ */
+function clearSchemaCache() {
+  const ids = SheetService.getActiveSchemas().map(s => s.schemaId);
+  SchemaService.invalidate(ids);
+  Logger.log(`Schema cache cleared for: ${ids.join(', ') || '(none)'}`);
+}
+
+/**
  * Generate the TOKEN_SECRET. Run once during setup, copy output into
  * Script Properties as TOKEN_SECRET.
  */
@@ -206,7 +216,8 @@ function verifyDeployment() {
     ['SignatureService', () => SignatureService, ['saveSignature']],
     ['PdfService', () => PdfService, ['finalizeInspection']],
     ['DriveService', () => DriveService, ['createInspectionFolders', 'getThumbnailUrl']],
-    ['SchemaService', () => SchemaService, ['listActiveSchemas', 'getSchemaJson']],
+    ['SchemaService', () => SchemaService, ['listActiveSchemas', 'getSchemaJson',
+      'invalidate']],
     ['SchemaSeed', () => SchemaSeed, ['getAllSeeds']],
     ['ValidationService', () => ValidationService, []],
     ['ResponseService', () => ResponseService, ['success', 'error', 'fromException']],
