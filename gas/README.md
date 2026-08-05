@@ -10,6 +10,13 @@ clasp login
 clasp push          # from the repository root
 ```
 
+The push replaces the project's files with the ones in `gas/`, so it also
+repairs a project whose file names have already drifted — the repository
+becomes the authority rather than whatever the editor happens to hold.
+
+Files in the project that are not in `gas/` are deleted. That is intended: a
+stray file left over from a bad paste is exactly what should go.
+
 ## Why this matters more than it sounds
 
 Copying files one at a time into the editor has gone wrong twice, the same way
@@ -42,16 +49,18 @@ root:
 `.clasp.json` is gitignored — it points at one specific deployment, and yours
 is not necessarily anyone else's.
 
-`gas/appsscript.json` is **not** in this repository. `clasp push` will send
-whatever manifest is in `rootDir`, so pull the current one down first:
+`clasp push` sends whatever manifest is in `rootDir`, so `gas/appsscript.json`
+has to exist before the first push.
 
-```bash
-clasp pull          # brings appsscript.json into gas/
-```
+**Do not use `clasp pull` to get it.** Pull overwrites `rootDir` with whatever
+is currently in the project — including names that have drifted from their
+contents, which is the very thing this is meant to stop. It would pull the mess
+into the repository instead of pushing the repository over the mess.
 
-Check it keeps `timeZone` and the four OAuth scopes the backend needs
-(`spreadsheets`, `drive`, `documents`, `script.send_mail`) before pushing
-anything back.
+Copy it by hand instead, once: in the editor, ⚙ Project Settings → *Show
+"appsscript.json" manifest file*, then paste its contents into
+`gas/appsscript.json`. `timeZone` and the OAuth scopes are deployment
+decisions — take them as they are rather than rewriting them here.
 
 ## After pushing
 
