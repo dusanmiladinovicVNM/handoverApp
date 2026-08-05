@@ -938,22 +938,41 @@ function humanEvent(type) {
 // ============================================================
 
 /**
- * The last list the server sent, kept on the device.
+ * How long the remembered list is trusted without asking the server.
  *
- * This is the screen everything returns to, and re-fetching it on every arrival
- * meant a two-to-four second wait to look at rows that were on screen a moment
- * earlier. Held in localStorage rather than in memory so that it survives
- * closing the app — which is when the wait was most obvious, since a cold start
- * had nothing to show at all.
+ * Showing the cached list instantly but still fetching on every arrival was
+ * only half a fix: the request went out each time the screen was opened, which
+ * on this backend is a second or two of work to confirm that nothing had
+ * changed since the user left it a moment earlier.
  *
- * Cleared on sign-out along with the other caches; see utils/store.js.
+ * Within this window the screen opens with no request at all. Outside it, the
+ * cached rows are shown immediately and refreshed behind them. Anything that
+ * actually changes the list clears the stamp, so a new or reassigned
+ * inspection appears at once rather than after the window expires.
  */
+const LIST_FRESH_MS = 60 * 1000;
+
+function readCachedList() {
+  const cached = readJson(CACHE_KEYS.inspectionList);
+  // An array is the older shape, from before staleness was tracked. Usable for
+  // display, but treated as expired so it gets replaced on first use.
+  if (Array.isArray(cached)) return { rows: cached, fetchedAt: 0 };
+  return cached && Array.isArray(cached.rows) ? cached : null;
+}
+
+/** Called wherever something changes what the list should say. */
+function invalidateCachedList() {
+  writeJson(CACHE_KEYS.inspectionList, null);
+}
+
 export function pageAdminList() {
-  const remembered = readJson(CACHE_KEYS.inspectionList);
-  let inspections = remembered || [];
+  const remembered = readCachedList();
+  let inspections = remembered ? remembered.rows : [];
   let loading = !remembered;
   let error = null;
   let filter = { status: [], search: '' };
+
+  const isFresh = !!remembered && (Date.now() - remembered.fetchedAt) < LIST_FRESH_MS;
 
   async function load() {
     // Only show the spinner when there is nothing to show instead. Replacing a
@@ -965,7 +984,10 @@ export function pageAdminList() {
       // Only the unfiltered list is worth remembering: a filtered one would
       // reopen looking like the whole set while showing a subset.
       if (!filter.search && (!filter.status || filter.status.length === 0)) {
-        writeJson(CACHE_KEYS.inspectionList, inspections);
+        writeJson(CACHE_KEYS.inspectionList, {
+          rows: inspections,
+          fetchedAt: Date.now(),
+        });
       }
       error = null;
     } catch (e) {
@@ -990,6 +1012,12 @@ export function pageAdminList() {
               style: { color: 'white' },
               onClick: () => navigate('/admin/new'),
             }, '+ New'),
+            h('button', {
+              class: 'btn btn--sm btn--ghost',
+              style: { color: 'white' },
+              title: 'Refresh',
+              onClick: () => { invalidateCachedList(); load(); },
+            }, '⟳'),
             isAdmin()
               ? h('button', {
                   class: 'btn btn--sm btn--ghost',
@@ -1079,7 +1107,11 @@ export function pageAdminList() {
     );
   }
 
-  load();
+  // Inside the freshness window the screen simply opens. The user asked for a
+  // refresh button rather than a silent request every time, and that is the
+  // honest trade: no hidden work, one obvious way to force it.
+  if (isFresh) render();
+  else load();
 }
 
 // ============================================================
@@ -1141,6 +1173,7 @@ export function pageAdminNew() {
     submitting = true; render();
     try {
       const res = await api.createInspection(form);
+      invalidateCachedList();
       toastSuccess('Inspection created.');
       // Show the tenant URL in a modal
       showTenantLinkModal(res.inspectionId, res.tenantUrl);
@@ -2201,6 +2234,7 @@ function openAssign(inspectionId, currentEmail) {
             modal.close();
             try {
               await api.assignInspection(inspectionId, u.email);
+              invalidateCachedList();
               toastSuccess(`Assigned to ${u.name}.`);
               // Reload rather than patch local state: the server normalises the
               // address, and showing anything else would be a small lie about
