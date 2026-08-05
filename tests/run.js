@@ -22,11 +22,16 @@ const suites = [
   ['Sign-in flows', require('./account.test')],
   ['Inspection visibility', require('./visibility.test')],
   ['Account administration', require('./user-admin.test')],
+  ['Local drafts', require('./drafts.test')],
 ];
 
-for (const [name, run] of suites) {
-  console.log(`\n=== ${name} ===`);
-  run();
-}
+// Awaited, because the frontend suites import ES modules and so are async.
+// The backend ones return undefined and await straight through.
+(async () => {
+  for (const [name, run] of suites) {
+    console.log(`\n=== ${name} ===`);
+    await run();
+  }
 
-process.exit(summary() ? 1 : 0);
+  process.exit(summary() ? 1 : 0);
+})();
