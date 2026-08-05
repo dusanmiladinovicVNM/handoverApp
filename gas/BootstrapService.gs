@@ -31,6 +31,8 @@ function bootstrapSheet() {
   }
 
   _seedMissingConfigKeys(ss);
+  // Keys just written would otherwise be invisible for five minutes.
+  Config.invalidateCache();
 
   Logger.log('Bootstrap complete.');
 }
@@ -169,8 +171,23 @@ function loadInitialSchemas() {
  *   stale       the value is a number but predates a change to the default. Not
  *               an error, and the reason it is listed rather than fixed.
  */
+/**
+ * Make a Config edit take effect now rather than within five minutes.
+ *
+ * The sheet is read through a short-lived cache so that resolving a session
+ * does not have to open the workbook — see Config. This drops it.
+ */
+function reloadConfig() {
+  Config.invalidateCache();
+  Logger.log('Config cache cleared. The next request reads the sheet.');
+  checkConfig();
+}
+
 function checkConfig() {
   const defaults = CONFIG_DEFAULTS();
+  // Straight from the sheet, never the cache: the point of this function is to
+  // report what is actually written down.
+  Config.invalidateCache();
   const rows = SheetService.getConfigRows();
 
   const inSheet = {};

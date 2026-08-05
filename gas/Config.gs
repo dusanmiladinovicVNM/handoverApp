@@ -46,25 +46,68 @@ const Config = (function () {
 
   // --- From Config sheet (live, editable) ---
 
-  // Held for the life of one execution, which is the life of one request —
-  // module state does not survive between them, so the TTL this once carried
-  // could never expire and never applied. Reads go through SheetService so the
-  // workbook is opened once per request rather than once here and once there.
+  /**
+   * The Config sheet, in two layers.
+   *
+   * The per-execution copy is the life of one request; module state does not
+   * survive between them, so the TTL this once carried could never expire and
+   * never applied.
+   *
+   * Above it sits CacheService, and that layer exists because of a circle
+   * measured on this deployment. Resolving a session asks AuthMirror whether it
+   * may use a remembered row; AuthMirror asks Config for the window; Config
+   * opened the workbook to answer. So the cache built to keep authentication
+   * off the spreadsheet had to touch the spreadsheet to decide whether it was
+   * allowed to. A `me` request that read nothing still spent 1.1 s in auth, 592
+   * of them opening the workbook for one config lookup.
+   *
+   * Five minutes, not the six hours used for auth rows and schemas. Config is
+   * how a deployment is tuned, and someone changing a value expects it to take
+   * effect while they are still looking at the sheet. Five minutes removes the
+   * workbook open from nearly every request and still behaves the way the sheet
+   * being "live, editable" implies. reloadConfig() makes an edit take hold at
+   * once.
+   */
+  const CACHE_KEY = 'cfg:sheet';
+  const CACHE_TTL_SECONDS = 300;
+
   let _configCache = null;
 
   function _loadConfigSheet() {
     if (_configCache) return _configCache;
 
+    try {
+      const hit = CacheService.getScriptCache().get(CACHE_KEY);
+      if (hit) {
+        _configCache = JSON.parse(hit);
+        return _configCache;
+      }
+    } catch (e) {
+      // A cache that cannot be read is only slower.
+    }
+
     const map = {};
+    let read = false;
     try {
       SheetService.getConfigRows().forEach(row => {
         if (row.key) map[String(row.key)] = String(row.value);
       });
+      read = true;
     } catch (e) {
       // A missing or unreadable Config sheet means every getter falls back to
       // its default, which is a working app rather than a broken one.
       Utils.log('WARN', 'Config sheet unreadable, using defaults', { error: e.message });
     }
+
+    // Only remember a map that came from the sheet. Caching the empty one would
+    // pin every setting to its default for the next five minutes on the
+    // strength of a single failed read.
+    if (read) {
+      try {
+        CacheService.getScriptCache().put(CACHE_KEY, JSON.stringify(map), CACHE_TTL_SECONDS);
+      } catch (e) {}
+    }
+
     _configCache = map;
     return _configCache;
   }
@@ -96,8 +139,12 @@ const Config = (function () {
     return n;
   }
 
+  /** Forget both layers, so the next read goes to the sheet. */
   function invalidateCache() {
     _configCache = null;
+    try {
+      CacheService.getScriptCache().remove(CACHE_KEY);
+    } catch (e) {}
   }
 
   // --- Convenience getters for common config keys ---

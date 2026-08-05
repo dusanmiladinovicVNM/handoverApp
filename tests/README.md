@@ -113,3 +113,22 @@ the number — but never delete the path assertion beside it.
 service again against the same fake Drive and the same Script Properties. That
 is what a later request sees: the remembered ids survive, the per-execution
 caches do not.
+
+## config-cache.test.js
+
+The real `Config`, over a Config sheet that counts how often it is read.
+
+This layer exists because of a circle the measurements exposed: resolving a
+session asks `AuthMirror` whether it may use a remembered row, `AuthMirror` asks
+`Config` for the window, and `Config` opened the workbook to answer. The cache
+built to keep authentication off the spreadsheet had to touch the spreadsheet
+to find out whether it was allowed to.
+
+The test with teeth is "a read that failed is not remembered". Caching an empty
+map would pin every setting in the app to its code default for the length of
+the window, on the strength of one bad read — and because the defaults are
+mostly sensible, nothing would look broken.
+
+Its `loadConfig(shared)` follows the same pattern as `drive-folders.test.js`:
+pass the previous run's cache store to simulate a second request against the
+same installation.
