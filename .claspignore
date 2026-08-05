@@ -1,0 +1,7 @@
+# clasp resolves these against the project root, not rootDir — so the safe
+# form is to exclude everything and then re-admit exactly what belongs in the
+# Apps Script project. Anything else in gas/ (README.md today, whatever else
+# later) stays out without needing a rule of its own.
+**/**
+!gas/**.gs
+!gas/appsscript.json
