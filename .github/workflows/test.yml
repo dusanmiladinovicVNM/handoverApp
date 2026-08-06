@@ -1,0 +1,30 @@
+# The suite existed and nothing ran it. Every check in tests/ was a matter of
+# whoever happened to type `node tests/run.js` before opening a pull request —
+# which is not a check, it is a habit.
+#
+# No dependencies to install: the runner is plain Node with no framework, and
+# the backend suites load the real .gs sources under stubs.
+
+name: tests
+
+# Nothing here writes anything: no comments, no commits, no releases. The
+# token gets read and nothing else.
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: node tests/run.js

@@ -121,6 +121,63 @@ const ValidationService = (function () {
   // --- State transition rules ---
 
   /**
+   * The only statuses in which an inspection's content may change.
+   *
+   * The list used to be written out by hand at each place that needed it —
+   * saveSection, uploadAttachment, deleteAttachment — and the three copies
+   * drifted. Deleting a photo checked only 'signed' and 'archived', so a
+   * photograph could be removed from an inspection that was locked for
+   * signature, and even from one a party had already signed. For a document
+   * whose only purpose is to be evidence in a dispute, that is the one thing
+   * that must not be possible.
+   *
+   * This is an allowlist, and the distinction is the whole point. Written the
+   * other way round — a list of frozen statuses, refuse if it matches — the
+   * answer to anything it had not heard of was yes: a status misspelt in the
+   * sheet, an empty cell, a status added to the app later, or an inspection
+   * row that no longer exists. Every one of those let content through.
+   *
+   * A denylist is a reasonable default when the cost of a wrong answer is an
+   * inconvenience. Here the cost is a signed document that no longer says what
+   * was signed, so the unknown case has to close rather than open.
+   *
+   * Reopening a locked inspection goes through unlockInspection, which
+   * invalidates the signatures and rotates the tenant nonce — deliberately,
+   * visibly, and in the audit log.
+   */
+  const CONTENT_EDITABLE = ['draft', 'under_review'];
+
+  /** The statuses unlockInspection will actually accept. */
+  const UNLOCKABLE = ['locked_for_signature', 'partially_signed'];
+
+  function isContentEditable(inspection) {
+    return !!inspection && CONTENT_EDITABLE.indexOf(inspection.status) >= 0;
+  }
+
+  /**
+   * @param verb  what the caller was trying to do, for the message
+   */
+  function assertContentEditable(inspection, verb) {
+    // Not every caller checks this before asking, and the one that did not was
+    // deleting attachments: a missing row used to stop it only by throwing on
+    // a property access.
+    if (!inspection) {
+      throw new HandoverError('NOT_FOUND', 'Inspection not found.');
+    }
+    if (isContentEditable(inspection)) return;
+
+    // "Unlock it first" is only true where unlockInspection would agree. For a
+    // signed, archived or cancelled inspection it is advice that leads
+    // straight to a second refusal.
+    const canUnlock = UNLOCKABLE.indexOf(inspection.status) >= 0;
+    throw new HandoverError('INSPECTION_LOCKED',
+      `Cannot ${verb}: inspection is in status '${inspection.status}'. ` +
+      (canUnlock
+        ? 'Unlock it first, which invalidates any signatures already collected.'
+        : 'It is no longer open for editing.'));
+  }
+
+  /**
    * Check whether transitioning to lock_for_signature is allowed.
    * Throws VALIDATION_FAILED with details if not.
    */
@@ -182,6 +239,9 @@ const ValidationService = (function () {
     isItemRequired,
     buildAnswersMap,
     findMissingRequiredItems,
+    CONTENT_EDITABLE,
+    isContentEditable,
+    assertContentEditable,
     validateForLock,
     validateForFinalize,
     canTransition,

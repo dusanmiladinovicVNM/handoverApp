@@ -90,9 +90,37 @@ function handleHashChange() {
   }
 }
 
+/**
+ * Built as nodes rather than markup. The path comes from location.hash, which
+ * is as close to attacker-controlled as anything in this app gets — a link is
+ * all it takes — and this origin's localStorage holds a session token and a
+ * device token good for sixty days.
+ *
+ * Today the browser percent-encodes < and > in a hash and parseHash does not
+ * decode the path, so the interpolated version was inert. That is a defence
+ * the browser happens to provide, not one this file was making. Both halves
+ * could change in a single commit.
+ */
 let _notFoundHandler = (path) => {
-  document.getElementById('app-root').innerHTML =
-    `<div class="app-body"><h1 class="page__title">Not found</h1><p class="text-muted">No route for ${path}</p></div>`;
+  const root = document.getElementById('app-root');
+  root.textContent = '';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'app-body';
+
+  const title = document.createElement('h1');
+  title.className = 'page__title';
+  title.textContent = 'Not found';
+
+  const body = document.createElement('p');
+  body.className = 'text-muted';
+  body.append('No route for ');
+  const code = document.createElement('code');
+  code.textContent = path;
+  body.append(code);
+
+  wrap.append(title, body);
+  root.append(wrap);
 };
 
 export function notFound(path) {

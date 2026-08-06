@@ -17,15 +17,7 @@ const AttachmentService = (function () {
     const inspection = SheetService.getInspection(data.inspectionId);
     if (!inspection) throw new HandoverError('NOT_FOUND', 'Inspection not found.');
 
-    // Block uploads on locked/finalized
-    if (inspection.status === 'locked_for_signature' ||
-        inspection.status === 'partially_signed' ||
-        inspection.status === 'signed' ||
-        inspection.status === 'archived' ||
-        inspection.status === 'cancelled') {
-      throw new HandoverError('INSPECTION_LOCKED',
-        `Cannot upload photo: inspection is in status '${inspection.status}'.`);
-    }
+    ValidationService.assertContentEditable(inspection, 'upload a photo');
 
     // Quota checks
     const itemMax = Config.getMaxAttachmentsPerItem();
@@ -118,10 +110,9 @@ const AttachmentService = (function () {
     }
 
     const inspection = SheetService.getInspection(data.inspectionId);
-    if (inspection.status === 'signed' || inspection.status === 'archived') {
-      throw new HandoverError('INSPECTION_LOCKED',
-        `Cannot delete photo on '${inspection.status}' inspection.`);
-    }
+    // Was 'signed' and 'archived' only, which let evidence be removed from an
+    // inspection that had been locked for signature — or already half signed.
+    ValidationService.assertContentEditable(inspection, 'delete a photo');
 
     SheetService.softDeleteAttachment(data.attachmentId);
     try {
