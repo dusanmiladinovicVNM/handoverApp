@@ -7,6 +7,11 @@
 
 name: tests
 
+# Nothing here writes anything: no comments, no commits, no releases. The
+# token gets read and nothing else.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]

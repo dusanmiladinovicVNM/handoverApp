@@ -1,6 +1,6 @@
 /**
  * markup.test.js
- * Nothing in the frontend builds HTML out of strings.
+ * No known HTML sink is used in the frontend.
  *
  * Three places did: the router's fallback handler, the one app.js installs
  * over it, and the boot-error screen. Each interpolated a value the app does
@@ -17,6 +17,13 @@
  *
  * So the rule is the flat one — no markup from strings, anywhere — because it
  * can be checked, while "escaped correctly at each site" cannot.
+ *
+ * What this can honestly promise is the title: the known sinks are absent. It
+ * enumerates them, so it is only ever as good as that list. A reviewer pointed
+ * out that the first version claimed "nothing builds HTML out of strings"
+ * while checking innerHTML alone — insertAdjacentHTML, outerHTML, DOMParser
+ * and createContextualFragment would all have walked past it. They are in the
+ * list now, and a sink invented after this was written still would not be.
  */
 
 const fs = require('fs');
@@ -36,7 +43,7 @@ function jsFiles(dir) {
 module.exports = function run() {
   const files = jsFiles(JS_DIR);
 
-  section('Nothing interpolates into markup:');
+  section('The known sinks are absent:');
 
   check('no innerHTML is assigned a value built from a variable', () => {
     // Clearing with '' is fine and common; anything with a substitution in it
@@ -59,9 +66,25 @@ module.exports = function run() {
       "h({ html }) is back — one attribute name away from undoing all of this");
   });
 
-  check('and no document.write anywhere', () => {
-    const bad = files.filter(f => /document\.write\s*\(/.test(fs.readFileSync(f, 'utf8')));
-    assert(bad.length === 0, bad.map(f => path.relative(JS_DIR, f)).join(', '));
+  /**
+   * The other ways a string becomes markup. Each parses HTML, so each is the
+   * same hazard wearing a different name.
+   */
+  const SINKS = [
+    ['document.write', /document\.write(ln)?\s*\(/],
+    ['insertAdjacentHTML', /insertAdjacentHTML\s*\(/],
+    ['outerHTML assignment', /outerHTML\s*=/],
+    ['DOMParser', /new\s+DOMParser\s*\(/],
+    ['createContextualFragment', /createContextualFragment\s*\(/],
+    ['srcdoc assignment', /\.srcdoc\s*=/],
+  ];
+
+  SINKS.forEach(([name, pattern]) => {
+    check(`no ${name}`, () => {
+      const bad = files.filter(f => pattern.test(fs.readFileSync(f, 'utf8')));
+      assert(bad.length === 0,
+        bad.map(f => path.relative(JS_DIR, f)).join(', '));
+    });
   });
 
   section('The pieces that replaced them still exist:');
