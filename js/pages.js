@@ -32,6 +32,7 @@ import {
 } from './validator.js';
 import { AUTOSAVE_DEBOUNCE_MS } from './config.js';
 import { readJson, writeJson, CACHE_KEYS } from './utils/store.js';
+import { rememberDraft, forgetDraft, readDraft, draftSectionIds } from './utils/drafts.js';
 import {
   login as authLogin, setPassword as authSetPassword,
   signOut as authSignOut, suggestDeviceLabel,
@@ -1372,6 +1373,11 @@ export async function pageInspectionHome({ params }) {
     const schema = state.schema;
     const progress = inspectionProgress(schema, state.answers);
 
+    // Sections holding answers that never reached the server. Shown here
+    // because this is the screen someone lands on after the app was killed —
+    // without it they would have to open every section to find their work.
+    const unsent = new Set(draftSectionIds(inspectionId));
+
     const sectionRows = (schema.sections || []).map(section => {
       const sp = sectionProgress(section, state.answers);
       const indicatorClass = sp.totalRequired === 0 ? 'section-list__indicator--empty'
@@ -1385,6 +1391,12 @@ export async function pageInspectionHome({ params }) {
       },
         h('span', { class: ['section-list__indicator', indicatorClass] }),
         h('span', { class: 'section-list__title' }, section.title),
+        unsent.has(section.id)
+          ? h('span', {
+              class: 'badge badge--warning',
+              title: 'Typed on this device but not yet saved. Open the section to send it.',
+            }, 'Unsaved')
+          : null,
         h('span', { class: 'section-list__progress' },
           sp.totalRequired > 0 ? `${sp.completedRequired}/${sp.totalRequired}` : `${sp.completedVisible}/${sp.totalVisible}`),
         h('span', { class: 'section-list__chevron' }, '›'),
@@ -1487,6 +1499,19 @@ export async function pageInspectionSection({ params }) {
 
   // Pending changes buffer (drained by autosave)
   const pendingItems = {};
+
+  // Anything typed on a previous visit that never reached the server — a lost
+  // tab, a dead battery, or no signal. It is put back into state so the screen
+  // shows what was typed, and back into the buffer so it is actually sent;
+  // restoring only one of the two would show work that silently never saves.
+  const restored = readDraft(inspectionId, sectionId);
+  const restoredIds = Object.keys(restored);
+  if (restoredIds.length > 0) {
+    restoredIds.forEach(itemId => {
+      patchAnswer(sectionId, itemId, restored[itemId]);
+      pendingItems[itemId] = { ...restored[itemId] };
+    });
+  }
   // Reference to the save indicator element, updated in place (not via re-render)
   let saveIndicatorEl = null;
   // Reference to the cards container, so we can re-render only that part
@@ -1515,6 +1540,9 @@ export async function pageInspectionSection({ params }) {
     updateSaveIndicator();
     return api.saveSection(inspectionId, sectionId, itemsToSend)
       .then(() => {
+        // Only now is the local copy redundant. A failure leaves it in place,
+        // which is what makes the offline case work without any extra code.
+        forgetDraft(inspectionId, sectionId, Object.keys(itemsToSend));
         setState({ saveStatus: 'saved', saveError: null });
         updateSaveIndicator();
       })
@@ -1541,6 +1569,10 @@ export async function pageInspectionSection({ params }) {
       pendingItems[itemId] = { value: cur.value, comment: cur.comment || '' };
     }
     Object.assign(pendingItems[itemId], patch);
+    // Written now, not on the debounce. The debounce exists to spare the
+    // network; the disk is not what we are economising on, and the whole point
+    // is to survive the moment between typing and sending.
+    rememberDraft(inspectionId, sectionId, { [itemId]: pendingItems[itemId] });
     debouncedSave();
   }
 
@@ -1678,6 +1710,16 @@ export async function pageInspectionSection({ params }) {
   }
 
   render();
+
+  // Said out loud, and sent straight away. Restoring silently would leave
+  // someone looking at answers with no way to tell whether they are safe —
+  // which is the state this whole mechanism exists to end.
+  if (restoredIds.length > 0) {
+    toastWarning(
+      `${restoredIds.length} answer${restoredIds.length === 1 ? '' : 's'} ` +
+      'from this device had not been saved. Restored — sending now.');
+    flushSave();
+  }
 
   // Cleanup on next route
   if (window._currentPageCleanup) window._currentPageCleanup();

@@ -8,6 +8,8 @@
  * cannot be read is only slower.
  */
 
+import { clearAllDrafts } from './drafts.js';
+
 export function readJson(key) {
   try {
     const raw = localStorage.getItem(key);
@@ -39,4 +41,8 @@ export const CACHE_KEYS = {
 
 export function clearCaches() {
   Object.keys(CACHE_KEYS).forEach(name => writeJson(CACHE_KEYS[name], null));
+  // Drafts are keyed per inspection rather than by a fixed name, so they
+  // cannot be listed above. They hold the same kind of data and go the same
+  // way — see utils/drafts.js for what that costs.
+  clearAllDrafts();
 }

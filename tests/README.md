@@ -132,3 +132,21 @@ mostly sensible, nothing would look broken.
 Its `loadConfig(shared)` follows the same pattern as `drive-folders.test.js`:
 pass the previous run's cache store to simulate a second request against the
 same installation.
+
+## drafts.test.js
+
+The first frontend suite, and the reason `run.js` awaits each one — ES modules
+import asynchronously.
+
+`js/utils/drafts.js` earns cover that the rest of `js/` does not: everything
+else fails visibly, while this one fails by quietly losing an inspector's
+afternoon on a device nobody is watching.
+
+Two rules carry the design and both are asserted here. A draft is cleared only
+by a *confirmed* save — never by a failed one, which is what makes the offline
+case work without any code that knows about being offline. And a save clears
+only the items it was given, because anything typed while it was in flight is
+still outstanding.
+
+The fake `localStorage` can be made to throw on demand: private browsing and a
+full quota both do, and neither may break the app or block a sign-out.
