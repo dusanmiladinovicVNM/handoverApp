@@ -55,18 +55,28 @@ function doPost(e) {
     // Auth runs on every single request and reads two rows behind a cache, so
     // it is worth knowing separately from whatever the action itself does —
     // otherwise the obvious suspect and the real one look identical from here.
-    const totalMs = Date.now() - startedAt;
-    const timing = {
+    const workMs = Date.now() - startedAt;
+    const timing = Object.assign({
       action: action,
       actor: authCtx ? authCtx.actorString : 'anonymous',
       authMs: authMs,
-      handlerMs: totalMs - authMs,
-      totalMs: totalMs,
-    };
-    Utils.log('INFO', 'API call', timing);
-    _recordIfSlow(timing);
+      handlerMs: workMs - authMs,
+      totalMs: workMs,
+    },
+      SheetService.getStats(), DriveService.getStats(), PasswordService.getStats());
 
-    return ResponseService.success(result);
+    _recordTiming(timing);
+
+    // Measured after the diagnostics, so that whatever they cost is inside the
+    // number rather than beside it.
+    timing.responseReadyMs = Date.now() - startedAt;
+    timing.diagnosticsMs = timing.responseReadyMs - workMs;
+    Utils.log('INFO', 'API call', timing);
+
+    // The caller gets the same breakdown it would otherwise have to ask the
+    // sheet for, and only an admin: it names internal costs.
+    return ResponseService.success(
+      (authCtx && authCtx.isAdmin) ? Object.assign({ timing: timing }, result) : result);
 
   } catch (e) {
     return ResponseService.fromException(e);
@@ -74,43 +84,29 @@ function doPost(e) {
 }
 
 /**
- * Write a slow request's breakdown into AuditLog.
+ * Record a request's timing.
  *
- * The Executions panel already carries these numbers, but its rows do not
- * reliably expand for Web App calls — which makes the one place the timings
- * exist the one place they cannot be read. Putting the outliers in the sheet
- * means they can be looked at like any other data, by whoever is actually
- * wondering why something felt slow.
+ * This used to append a row to AuditLog, before the response was returned, for
+ * requests over a threshold. Two things were wrong with that. A sheet write is
+ * a remote round trip, so the diagnostic was adding to the wait of exactly the
+ * requests that were already slow — and because totalMs was computed before
+ * it, the number written down excluded the cost of writing it down. The
+ * slowest requests in the log were the ones whose reported figure was furthest
+ * from what the person actually waited.
  *
- * Only requests over the threshold are recorded. They are rare by definition,
- * so the extra write costs nothing in aggregate; logging every call would add a
- * write to all of them in order to study a handful.
+ * Logger output is local to the execution and shows up in the Executions panel
+ * next to the run it belongs to, so it costs nothing on the request path. The
+ * numbers also ride back in the response for an admin, which is how the
+ * Playwright benchmark reads them without going near the sheet.
  */
-function _recordIfSlow(timing) {
+function _recordTiming(timing) {
   try {
     const threshold = Config.getSlowRequestMs();
-    if (threshold > 0 && timing.totalMs < threshold) return;
-    // Where the handler's time actually went. Without this the row says four
-    // seconds and leaves the reader to guess between opening the workbook, the
-    // round trips after it, and the handler's own work.
-    const detail = {
-      action: timing.action,
-      authMs: timing.authMs,
-      handlerMs: timing.handlerMs,
-      totalMs: timing.totalMs,
-    };
-    // Three remote services and one deliberately expensive computation. Between
-    // them they account for nearly all of any slow request, and each has to be
-    // named separately or the row says "four seconds" and stops there.
-    Object.assign(detail, SheetService.getStats());
-    Object.assign(detail, DriveService.getStats());
-    Object.assign(detail, PasswordService.getStats());
-
-    AuditService.logAuth(timing.actor, 'slow_request', detail);
+    const slow = threshold > 0 && timing.totalMs >= threshold;
+    Utils.log(slow ? 'WARN' : 'INFO',
+      slow ? 'slow_request' : 'timing', timing);
   } catch (e) {
-    // Diagnostics must never be able to fail a request that has already
-    // succeeded. The response is built and waiting by the time this runs.
-    Utils.log('WARN', 'Slow-request log failed', { error: e.message });
+    // Diagnostics must never be able to fail a request that has succeeded.
   }
 }
 

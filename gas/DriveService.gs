@@ -12,10 +12,29 @@ const DriveService = (function () {
    * counted a handler's unexplained seconds could have been either. Creating an
    * inspection turned out to be seven round trips here against three to Sheets.
    */
-  const _stats = { calls: 0, ms: 0 };
+  const _stats = { calls: 0, ms: 0, files: 0 };
 
   function getStats() {
-    return { drive: _stats.calls, driveMs: _stats.ms };
+    return { drive: _stats.calls, driveMs: _stats.ms, driveFileOps: _stats.files };
+  }
+
+  /**
+   * A file operation, as opposed to a folder lookup.
+   *
+   * The first version of these counters wrapped only the folder walk, so a
+   * request could report driveMs: 300 while spending seconds creating files or
+   * iterating a folder — and the unmeasured remainder looked like platform
+   * startup. Counted separately from folder work because the two are fixed by
+   * different changes.
+   */
+  function _file(fn) {
+    const startedAt = Date.now();
+    try {
+      return fn();
+    } finally {
+      _stats.files += 1;
+      _stats.ms += Date.now() - startedAt;
+    }
   }
 
   function _drive(fn) {
@@ -151,7 +170,7 @@ const DriveService = (function () {
   function savePhoto(inspectionId, sectionId, itemId, base64Data, mimeType, originalName) {
     const photosFolder = getSubfolder(inspectionId, 'photos');
     // Determine sequential index for this item
-    const existing = photosFolder.getFiles();
+    const existing = _file(() => photosFolder.getFiles());
     let index = 1;
     const prefix = `${inspectionId}__${sectionId}__${itemId}__`;
     while (existing.hasNext()) {
@@ -163,7 +182,7 @@ const DriveService = (function () {
     const fileName = `${prefix}${paddedIndex}.${ext}`;
 
     const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), mimeType, fileName);
-    const file = photosFolder.createFile(blob);
+    const file = _file(() => photosFolder.createFile(blob));
     return { fileId: file.getId(), fileName };
   }
 
@@ -171,12 +190,12 @@ const DriveService = (function () {
     const folder = getSubfolder(inspectionId, 'signatures');
     const fileName = `${signerRole}-signature.png`;
     // Remove any prior signature for this role (we keep only latest valid)
-    const existing = folder.getFilesByName(fileName);
+    const existing = _file(() => folder.getFilesByName(fileName));
     while (existing.hasNext()) {
-      existing.next().setTrashed(true);
+      _file(() => existing.next().setTrashed(true));
     }
     const blob = Utilities.newBlob(Utilities.base64Decode(base64Png), 'image/png', fileName);
-    const file = folder.createFile(blob);
+    const file = _file(() => folder.createFile(blob));
     return { fileId: file.getId(), fileName };
   }
 
@@ -185,37 +204,37 @@ const DriveService = (function () {
    * Used for soft-deleted attachments.
    */
   function moveToDeleted(inspectionId, fileId) {
-    const file = DriveApp.getFileById(fileId);
+    const file = _file(() => DriveApp.getFileById(fileId));
     const deletedFolder = getSubfolder(inspectionId, '_deleted');
     const photosFolder = getSubfolder(inspectionId, 'photos');
-    deletedFolder.addFile(file);
-    photosFolder.removeFile(file);
+    _file(() => deletedFolder.addFile(file));
+    _file(() => photosFolder.removeFile(file));
   }
 
   function saveOutputFile(inspectionId, fileBlob, fileName) {
     const folder = getSubfolder(inspectionId, 'output');
     // Remove existing file with same name (allow re-finalize)
-    const existing = folder.getFilesByName(fileName);
+    const existing = _file(() => folder.getFilesByName(fileName));
     while (existing.hasNext()) {
-      existing.next().setTrashed(true);
+      _file(() => existing.next().setTrashed(true));
     }
-    const file = folder.createFile(fileBlob.setName(fileName));
+    const file = _file(() => folder.createFile(fileBlob.setName(fileName)));
     return { fileId: file.getId(), url: `https://drive.google.com/file/d/${file.getId()}/view` };
   }
 
   function saveJsonFile(inspectionId, jsonString, fileName) {
     const folder = getSubfolder(inspectionId, 'output');
-    const existing = folder.getFilesByName(fileName);
+    const existing = _file(() => folder.getFilesByName(fileName));
     while (existing.hasNext()) {
-      existing.next().setTrashed(true);
+      _file(() => existing.next().setTrashed(true));
     }
     const blob = Utilities.newBlob(jsonString, 'application/json', fileName);
-    const file = folder.createFile(blob);
+    const file = _file(() => folder.createFile(blob));
     return { fileId: file.getId() };
   }
 
   function getFileBlob(fileId) {
-    return DriveApp.getFileById(fileId).getBlob();
+    return _file(() => DriveApp.getFileById(fileId).getBlob());
   }
 
   function getThumbnailUrl(fileId) {

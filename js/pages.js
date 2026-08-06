@@ -1079,8 +1079,14 @@ export function pageAdminList() {
                       h('h2', { class: 'empty-state__title' }, 'No inspections yet'),
                       h('p', { class: 'empty-state__description' }, 'Create your first inspection to get started.'),
                       h('button', { class: 'btn btn--primary mt-4', onClick: () => navigate('/admin/new') }, '+ New Inspection'))
+                  : visibleRows().length === 0
+                  ? h('div', { class: 'empty-state' },
+                      h('div', { class: 'empty-state__icon' }, '○'),
+                      h('h2', { class: 'empty-state__title' }, 'Nothing matches'),
+                      h('p', { class: 'empty-state__description' },
+                        'No inspection in the list matches that search.'))
                   : h('ul', { class: 'list' },
-                      inspections.map(i => h('li', {
+                      visibleRows().map(i => h('li', {
                         class: 'list-item',
                         onClick: () => navigate('/admin/inspection/' + i.inspectionId),
                       },
@@ -1109,17 +1115,40 @@ export function pageAdminList() {
     );
   }
 
+  /** Typed into the search box; never sent to the server. See renderFilterBar. */
+  let searchText = '';
+
+  function visibleRows() {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return inspections;
+    return inspections.filter(i =>
+      String(i.propertyAddress || '').toLowerCase().includes(q) ||
+      String(i.tenantName || '').toLowerCase().includes(q) ||
+      String(i.landlordName || '').toLowerCase().includes(q) ||
+      String(i.inspectionId || '').toLowerCase().includes(q));
+  }
+
   function renderFilterBar() {
     return h('div', { class: 'card' },
       h('input', {
         type: 'search',
         class: 'form-input',
         placeholder: 'Search by address, tenant, or ID',
-        value: filter.search,
-        onInput: debounce((e) => {
-          filter.search = e.target.value;
-          load();
-        }, 350),
+        value: searchText,
+        // Filters the list already in hand rather than asking the server.
+        //
+        // It used to fire a request 350 ms after each keystroke, with no
+        // cancellation and no sequence number — so the answer to "a" could
+        // land after the answer to "apart" and replace it with the wrong
+        // rows. Searching locally removes the race by removing the request.
+        //
+        // This holds while the whole list fits in one page, which it does at
+        // 100 rows. Past that the server has to search again, and then it
+        // needs a sequence guard.
+        onInput: (e) => {
+          searchText = e.target.value;
+          render();
+        },
       })
     );
   }
@@ -1152,23 +1181,25 @@ export function pageAdminNew() {
     assignedTo: '',
   };
 
+  /**
+   * One request, not two in sequence.
+   *
+   * This used to fetch the schema list, wait, and then fetch the user list —
+   * two Apps Script executions, two cold starts, two auth resolutions and two
+   * redirects, for a form that needs both at once and neither before the
+   * other. Running them in parallel would have halved the wait; asking once
+   * removes an execution.
+   *
+   * The server sends assignableUsers only to an admin, so no branch is needed
+   * here: for an inspector it arrives empty and the dropdown is not rendered.
+   */
   async function load() {
     try {
-      const res = await api.getSchemas();
+      const res = await api.getNewInspectionOptions();
       schemas = res.schemas || [];
+      assignableUsers = res.assignableUsers || [];
     } catch (e) {
       toastError(e.message);
-    }
-    // listUsers is admin-only, so this is not attempted otherwise — and its
-    // failure must not stop an inspection being created. Without the list the
-    // form simply assigns to whoever is filling it in.
-    if (isAdmin()) {
-      try {
-        const res = await api.listUsers();
-        assignableUsers = (res.users || []).filter(u => u.status === 'active');
-      } catch (e) {
-        assignableUsers = [];
-      }
     }
     loading = false;
     render();

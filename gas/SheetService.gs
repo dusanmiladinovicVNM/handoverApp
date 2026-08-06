@@ -76,7 +76,12 @@ const SheetService = (function () {
    * trip as a read, and a handler like createInspection does three of them
    * while the person sits looking at a spinner.
    */
-  const _stats = { opened: false, openMs: 0, reads: 0, readMs: 0, writes: 0, writeMs: 0 };
+  const _stats = {
+    opened: false, openMs: 0,
+    reads: 0, readMs: 0,
+    writes: 0, writeMs: 0,
+    locks: 0, lockWaitMs: 0,
+  };
 
   function _ss() {
     if (!_ssCache) {
@@ -93,7 +98,49 @@ const SheetService = (function () {
       openMs: _stats.openMs,
       reads: _stats.reads, readMs: _stats.readMs,
       writes: _stats.writes, writeMs: _stats.writeMs,
+      locks: _stats.locks, lockWaitMs: _stats.lockWaitMs,
     };
+  }
+
+  /**
+   * Count a read that does not go through _getAllRows.
+   *
+   * These were left out of the first version of the counters, on the reasoning
+   * that direct-cell reads sit on write paths where nobody is waiting. That was
+   * wrong, and wrong in the worst place: upsertAnswer scans the whole Answers
+   * sheet on every item of every autosave, which is exactly where someone is
+   * waiting. Uncounted, the numbers would have shown no improvement from
+   * batching that loop — because they were never showing the cost.
+   */
+  function _rawRead(fn) {
+    const startedAt = Date.now();
+    try {
+      return fn();
+    } finally {
+      _stats.reads += 1;
+      _stats.readMs += Date.now() - startedAt;
+    }
+  }
+
+  /**
+   * Take the script lock, and record how long it was waited on.
+   *
+   * getScriptLock is application-wide: two inspectors saving two unrelated
+   * inspections queue behind each other. That is a platform property rather
+   * than a bug here, but time spent waiting on it is indistinguishable from
+   * slowness unless it is measured separately.
+   */
+  function _withLock(timeoutMs, fn) {
+    const lock = LockService.getScriptLock();
+    const startedAt = Date.now();
+    lock.waitLock(timeoutMs);
+    _stats.locks += 1;
+    _stats.lockWaitMs += Date.now() - startedAt;
+    try {
+      return fn();
+    } finally {
+      lock.releaseLock();
+    }
   }
 
   /** Wrap a write so it shows up in the slow-request breakdown. */
@@ -320,14 +367,14 @@ const SheetService = (function () {
    * Uses a script lock to prevent race conditions on rapid saves.
    */
   function upsertAnswer(answer) {
-    const lock = LockService.getScriptLock();
-    lock.waitLock(10000);
-    try {
+    return _withLock(10000, function () {
       const sheet = _sheet('Answers');
       const lastRow = sheet.getLastRow();
       let foundRowIndex = -1;
       if (lastRow > 1) {
-        const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues(); // first 3 columns: inspectionId, sectionId, itemId
+        // Counted: this runs once per changed item, per autosave.
+        const data = _rawRead(() =>
+          sheet.getRange(2, 1, lastRow - 1, 3).getValues()); // inspectionId, sectionId, itemId
         for (let i = 0; i < data.length; i++) {
           if (String(data[i][0]) === answer.inspectionId &&
               String(data[i][1]) === answer.sectionId &&
@@ -342,9 +389,7 @@ const SheetService = (function () {
       } else {
         _appendRow('Answers', answer);
       }
-    } finally {
-      lock.releaseLock();
-    }
+    });
   }
 
   // ============================================================
@@ -393,7 +438,7 @@ const SheetService = (function () {
     const sheet = _sheet('Answers');
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) return;
-    const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    const data = _rawRead(() => sheet.getRange(2, 1, lastRow - 1, 3).getValues());
     for (let i = 0; i < data.length; i++) {
       if (String(data[i][0]) === inspectionId &&
           String(data[i][1]) === sectionId &&
@@ -434,7 +479,8 @@ const SheetService = (function () {
     const sheet = _sheet('Signatures');
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) return [];
-    const data = sheet.getRange(2, 1, lastRow - 1, COLUMNS.Signatures.length).getValues();
+    const data = _rawRead(() =>
+      sheet.getRange(2, 1, lastRow - 1, COLUMNS.Signatures.length).getValues());
     const validColIdx = COLUMNS.Signatures.indexOf('valid');
     const inspectionIdColIdx = COLUMNS.Signatures.indexOf('inspectionId');
     const invalidated = [];
@@ -481,6 +527,37 @@ const SheetService = (function () {
   function getActiveSchemas() {
     const all = _getAllRows('Schemas').map(r => _rowToObject('Schemas', r));
     return all.filter(s => s.active === true);
+  }
+
+  /**
+   * Active schemas without their definitions.
+   *
+   * A form that lists inspection types needs four short columns. Going through
+   * getActiveSchemas fetched every row in full, and a Schemas row carries an
+   * entire form definition in schemaJson — tens of kilobytes to render a
+   * dropdown of two entries.
+   *
+   * Reads the narrow range instead, and does not warm the row cache: a request
+   * that only lists schemas has no use for the definitions, and one that needs
+   * a definition takes the narrow lookup path in _findRowByKey.
+   */
+  function getActiveSchemaSummaries() {
+    const cols = COLUMNS.Schemas;
+    const wanted = ['schemaId', 'inspectionType', 'version', 'active', 'title'];
+    const last = Math.max.apply(null, wanted.map(c => cols.indexOf(c))) + 1;
+
+    const sheet = _sheet('Schemas');
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return [];
+
+    const rows = _rawRead(() => sheet.getRange(2, 1, lastRow - 1, last).getValues());
+    return rows
+      .map(r => {
+        const o = {};
+        wanted.forEach(c => { o[c] = r[cols.indexOf(c)]; });
+        return o;
+      })
+      .filter(s => s.active === true);
   }
 
   function getSchema(schemaId) {
@@ -614,7 +691,8 @@ const SheetService = (function () {
     const sheet = _sheet('Devices');
     const lastRow = sheet.getLastRow();
     if (lastRow <= 1) return [];
-    const data = sheet.getRange(2, 1, lastRow - 1, COLUMNS.Devices.length).getValues();
+    const data = _rawRead(() =>
+      sheet.getRange(2, 1, lastRow - 1, COLUMNS.Devices.length).getValues());
     const userIdIdx = COLUMNS.Devices.indexOf('userId');
     const revokedAtIdx = COLUMNS.Devices.indexOf('revokedAt');
     const revokedByIdx = COLUMNS.Devices.indexOf('revokedBy');
@@ -664,6 +742,7 @@ const SheetService = (function () {
     getAuthAuditEvents,
     // Schemas
     getActiveSchemas,
+    getActiveSchemaSummaries,
     getSchema,
     upsertSchema,
     // Users
