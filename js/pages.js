@@ -66,11 +66,27 @@ export function pageHome() {
 // ============================================================
 
 /** Shared shell for the four screens that render before anyone is signed in. */
+/**
+ * The signed-out screens: sign in, set password, forgot password.
+ *
+ * The logo sits here rather than on each of them, so someone arriving from a
+ * mailed link lands on something that identifies itself before it asks for a
+ * password. Width and height are set to stop the card jumping down the page
+ * when the image loads.
+ */
 function authShell(title, ...children) {
   return h('div', { class: 'app-layout' },
     appHeader({ title }),
     h('main', { class: 'app-body' },
-      h('div', { class: 'page' }, ...children)
+      h('div', { class: 'page' },
+        h('div', { class: 'auth-logo' },
+          h('img', {
+            src: './assets/logo/cpmh-real-estate.svg',
+            alt: 'CPMH Real Estate',
+            width: 260,
+            height: 95,
+          })),
+        ...children)
     )
   );
 }

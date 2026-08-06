@@ -329,3 +329,39 @@ summary:focus-visible {
 .gap-2 { gap: var(--space-2); }
 .gap-3 { gap: var(--space-3); }
 .gap-4 { gap: var(--space-4); }
+
+/* --- Sign-in identity --- */
+
+.auth-logo {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6) 0 var(--space-2);
+}
+
+.auth-logo img {
+  /* Never wider than the card it sits above, and never so tall on a short
+     phone in landscape that the password field is pushed off screen. */
+  width: min(260px, 70%);
+  height: auto;
+}
+
+/* Links and form controls were still drawing in the browser's default blue —
+   the last of it in an app that is otherwise black, grey and one green. */
+a {
+  color: var(--color-accent-text);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  color: var(--color-ink);
+}
+
+/* Checkboxes and radios paint their tick from accent-color. One line covers
+   every one of them, on every platform that has native controls. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+progress {
+  accent-color: var(--color-accent);
+}

@@ -13,13 +13,20 @@
      small doses: a heading on a dark panel, a link on hover, a rule
      under an active item. It is never a large fill.
 
-     That restraint is not only taste. White on #76C600 is about 2:1,
+     That restraint is not only taste. White on the green is about 3:1,
      nowhere near readable, so a green button would have to carry dark
      text and would then shout louder than anything else on a screen
      someone works in for an hour at a time. Black chrome with a green
      accent is both what CPMH does and what survives that hour.
 
-     The five values below the rule are CPMH's own. Everything after
+     One caution for anyone matching this to CPMH material. Their
+     style.css declares --accent: #76C600, a bright lime, while the logo
+     files are drawn in #8FA426, an olive. The two do not match. This app
+     follows the logo, because the logo is what actually appears on the
+     screen next to the accent, and two greens that are close but not
+     equal read as a mistake in a way one green never does.
+
+     The values above the derived block are CPMH's own. Everything after
      them is derived, because an inspection app needs states a brochure
      site does not.
      ---------------------------------------------------------------- */
@@ -30,7 +37,7 @@
   --color-text:         #222222;
   --color-text-muted:   #555555;
   --color-border:       #e8e8e8;   /* CPMH --line */
-  --color-accent:       #76C600;   /* CPMH --accent: the brand green */
+  --color-accent:       #8FA426;   /* the green the CPMH logo is drawn in */
 
   --color-surface-alt:  #fafafa;
   --color-border-strong:#d4d4d4;
@@ -41,9 +48,9 @@
   --color-primary-hover:#333333;
   --color-primary-soft: #ededed;
 
-  /* The green darkened until it is readable as text on white (4.7:1).
+  /* The same green darkened until it is readable as text on white (4.8:1).
      Use --color-accent for rules, rings and fills; this for words. */
-  --color-accent-text:  #4e8300;
+  --color-accent-text:  #6B7A1C;
   --color-accent-soft:  #eaf7d6;
 
   --color-success:      #3f7a00;   /* the brand green, deepened */
@@ -129,7 +136,7 @@
   /* The focus ring is the green, and it is the one place it appears on
      every screen. Keyboard focus is exactly the "small dose, high
      salience" job the accent is for. */
-  --focus-ring: 0 0 0 3px rgba(118, 198, 0, 0.35);
+  --focus-ring: 0 0 0 3px rgba(143, 164, 38, 0.40);
 
   /* Layout */
   --header-height: 3.5rem;
