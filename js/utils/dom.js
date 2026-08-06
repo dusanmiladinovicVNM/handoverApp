@@ -24,8 +24,6 @@ export function h(tag, attrs, ...children) {
         Object.assign(el.dataset, v);
       } else if (key.startsWith('on') && typeof v === 'function') {
         el.addEventListener(key.slice(2).toLowerCase(), v);
-      } else if (key === 'html') {
-        el.innerHTML = v;
       } else if (typeof v === 'boolean') {
         if (v) el.setAttribute(key, '');
       } else {
@@ -61,7 +59,14 @@ export function $(sel, root = document) {
   return root.querySelector(sel);
 }
 
-/** Escape text for safe insertion into innerHTML. */
+/**
+ * Escape text for insertion into markup.
+ *
+ * Kept only because it is exported; nothing in the app builds markup from
+ * strings any more. If you find yourself reaching for it, reach for h() or
+ * textContent instead — escaping is a thing you can forget, and building
+ * nodes is not.
+ */
 export function escapeHtml(s) {
   return String(s)
     .replace(/&/g, '&amp;')

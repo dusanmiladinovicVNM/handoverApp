@@ -10,6 +10,7 @@
  */
 
 import * as Router from './router.js';
+import { h, mount } from './utils/dom.js';
 import { setAuth } from './api.js';
 import { setState, getState, isAdmin } from './state.js';
 import { restoreSession } from './auth.js';
@@ -97,13 +98,16 @@ function registerRoutes() {
   Router.route('/inspection/:id/sign', pageSign);
   Router.route('/inspection/:id/success', pageSuccess);
 
+  // Nodes, not markup — see the note on the default handler in router.js. The
+  // path is whatever was in the address bar.
   Router.setNotFoundHandler((path) => {
-    document.getElementById('app-root').innerHTML = `
-      <div class="app-body">
-        <h1 class="page__title">Page not found</h1>
-        <p class="text-muted">No route for <code>${path}</code></p>
-        <a href="#/" class="btn btn--primary mt-4">Back to home</a>
-      </div>`;
+    const code = h('code', null, path);
+    mount(document.getElementById('app-root'),
+      h('div', { class: 'app-body' },
+        h('h1', { class: 'page__title' }, 'Page not found'),
+        h('p', { class: 'text-muted' }, 'No route for ', code),
+        h('a', { href: '#/', class: 'btn btn--primary mt-4' }, 'Back to home'),
+      ));
   });
 
   Router.onChange(() => {
@@ -151,10 +155,12 @@ function requireAdmin(handler) {
 
 boot().catch((e) => {
   console.error('Boot failed:', e);
-  document.getElementById('app-root').innerHTML = `
-    <div class="app-body">
-      <div class="banner banner--danger">
-        <strong>Boot failed:</strong> ${e.message || e}
-      </div>
-    </div>`;
+  // e.message can carry text the server built from something the caller sent,
+  // so it is no safer here than the URL is.
+  mount(document.getElementById('app-root'),
+    h('div', { class: 'app-body' },
+      h('div', { class: 'banner banner--danger' },
+        h('strong', null, 'Boot failed: '),
+        String((e && e.message) || e),
+      )));
 });

@@ -121,6 +121,47 @@ const ValidationService = (function () {
   // --- State transition rules ---
 
   /**
+   * The statuses in which an inspection's content is closed to change.
+   *
+   * This list used to be written out by hand at each place that needed it —
+   * saveSection, uploadAttachment, deleteAttachment — and the three copies
+   * drifted. Deleting a photo checked only 'signed' and 'archived', so a
+   * photograph could be removed from an inspection that was locked for
+   * signature, and even from one a party had already signed.
+   *
+   * For a document whose only purpose is to be evidence in a dispute, that is
+   * the one thing that must not be possible. What was signed has to still be
+   * there afterwards.
+   *
+   * One list, one check, called by everything that writes content. Reopening a
+   * locked inspection goes through unlockInspection, which invalidates the
+   * signatures and rotates the tenant nonce — deliberately, visibly, and in
+   * the audit log.
+   */
+  const CONTENT_FROZEN = [
+    'locked_for_signature',
+    'partially_signed',
+    'signed',
+    'archived',
+    'cancelled',
+  ];
+
+  function isContentFrozen(inspection) {
+    return CONTENT_FROZEN.indexOf(inspection && inspection.status) >= 0;
+  }
+
+  /**
+   * @param verb  what the caller was trying to do, for the message
+   */
+  function assertContentEditable(inspection, verb) {
+    if (isContentFrozen(inspection)) {
+      throw new HandoverError('INSPECTION_LOCKED',
+        `Cannot ${verb}: inspection is in status '${inspection.status}'. ` +
+        'Unlock it first, which invalidates any signatures already collected.');
+    }
+  }
+
+  /**
    * Check whether transitioning to lock_for_signature is allowed.
    * Throws VALIDATION_FAILED with details if not.
    */
@@ -182,6 +223,9 @@ const ValidationService = (function () {
     isItemRequired,
     buildAnswersMap,
     findMissingRequiredItems,
+    CONTENT_FROZEN,
+    isContentFrozen,
+    assertContentEditable,
     validateForLock,
     validateForFinalize,
     canTransition,

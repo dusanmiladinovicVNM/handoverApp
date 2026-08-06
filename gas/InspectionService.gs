@@ -177,15 +177,7 @@ const InspectionService = (function () {
     const inspection = SheetService.getInspection(data.inspectionId);
     if (!inspection) throw new HandoverError('NOT_FOUND', 'Inspection not found.');
 
-    // Block writes on locked/finalized inspections
-    if (inspection.status === 'locked_for_signature' ||
-        inspection.status === 'partially_signed' ||
-        inspection.status === 'signed' ||
-        inspection.status === 'archived' ||
-        inspection.status === 'cancelled') {
-      throw new HandoverError('INSPECTION_LOCKED',
-        `Cannot save section: inspection is in status '${inspection.status}'.`);
-    }
+    ValidationService.assertContentEditable(inspection, 'save this section');
 
     const schemaJson = SchemaService.getSchemaJson(inspection.schemaId);
     const sectionItems = SchemaService.getSectionItems(schemaJson, data.sectionId);

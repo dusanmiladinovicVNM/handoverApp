@@ -23,6 +23,8 @@ const suites = [
   ['Inspection visibility', require('./visibility.test')],
   ['Account administration', require('./user-admin.test')],
   ['Local drafts', require('./drafts.test')],
+  ['Inspection lifecycle', require('./lifecycle.test')],
+  ['Markup safety', require('./markup.test')],
 ];
 
 // Awaited, because the frontend suites import ES modules and so are async.
