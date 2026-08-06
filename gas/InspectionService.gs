@@ -359,13 +359,16 @@ const InspectionService = (function () {
     const start = page * pageSize;
     const slice = all.slice(start, start + pageSize);
 
-    // One pass over the users to turn stored addresses into names. Looking each
-    // one up individually would be a sheet read per row on a cold cache; the
-    // whole list is a single read.
+    // One pass over the users to turn stored addresses into names — but only
+    // for an admin. The screen shows the assignee to nobody else, and an
+    // inspector's list is their own work anyway, so for them this was a whole
+    // sheet read to build a map nothing rendered.
     const nameByEmail = {};
-    UserService.listAll().forEach(u => {
-      nameByEmail[String(u.email).toLowerCase()] = u.name;
-    });
+    if (authCtx.isAdmin) {
+      UserService.listAll().forEach(u => {
+        nameByEmail[String(u.email).toLowerCase()] = u.name;
+      });
+    }
 
     const projected = slice.map(i => ({
       inspectionId: i.inspectionId,

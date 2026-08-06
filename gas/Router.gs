@@ -61,6 +61,26 @@ const Router = (function () {
       };
     },
 
+    /**
+     * Everything the New Inspection form needs, in one request.
+     *
+     * It used to make two, one after the other: getSchemas, then listUsers.
+     * Neither depends on the other, so the screen sat on a spinner for the sum
+     * of them — and each was a separate Apps Script execution, with its own
+     * cold start, its own auth, and its own redirect. Running them in parallel
+     * would have halved the wait and kept both executions; this removes one.
+     *
+     * The assignable list is admin-only because only an admin sees the
+     * dropdown: an inspector's new inspection is theirs by definition.
+     */
+    'getNewInspectionOptions': (authCtx, data) => {
+      AuthService.requireStaff(authCtx);
+      return {
+        schemas: SchemaService.listActiveSchemas(),
+        assignableUsers: authCtx.isAdmin ? UserService.listAssignable() : [],
+      };
+    },
+
     // --- Inspections ---
     'createInspection': (authCtx, data) => InspectionService.createInspection(authCtx, data),
     'getInspection': (authCtx, data) => InspectionService.getInspection(authCtx, data),
