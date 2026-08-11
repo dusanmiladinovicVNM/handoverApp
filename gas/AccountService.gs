@@ -286,11 +286,15 @@ const AccountService = (function () {
       result.deviceExpiresInDays = Config.getDeviceTtlDays();
     }
 
+    // One event, not two. A device row is created for every sign-in, so
+    // 'device_registered' fired on exactly the same occasions as
+    // 'login_succeeded' and carried nothing the other could not — two appends
+    // to the same sheet, in the request someone is watching a spinner for, to
+    // record one thing that happened once.
     AuditService.logAuth(`user:${user.email}`, 'login_succeeded', {
-      deviceId: device.deviceId, remembered: remember,
-    });
-    AuditService.logAuth(`user:${user.email}`, 'device_registered', {
-      deviceId: device.deviceId, label: device.label,
+      deviceId: device.deviceId,
+      deviceLabel: device.label,
+      remembered: remember,
     });
 
     return result;

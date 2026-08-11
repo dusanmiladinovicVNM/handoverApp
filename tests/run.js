@@ -22,6 +22,7 @@ const suites = [
   ['Auth mirror', require('./auth-mirror.test')],
   ['Sign-in flows', require('./account.test')],
   ['Inspection visibility', require('./visibility.test')],
+  ['State returned by mutations', require('./mutation-state.test')],
   ['Account administration', require('./user-admin.test')],
   ['Local drafts', require('./drafts.test')],
   ['Inspection lifecycle', require('./lifecycle.test')],
