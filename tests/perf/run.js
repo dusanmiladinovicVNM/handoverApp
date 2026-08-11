@@ -77,8 +77,13 @@ async function main() {
       if (!r.url().includes('/macros/s/')) return;
       try { calls.push(JSON.parse(r.postData() || '{}').action || '(none)'); } catch (_) {}
     });
+    // The request goes to /macros/s/…/exec, which answers 302 and sends the
+    // body from script.googleusercontent.com. Filtering responses on the
+    // request URL therefore matched only the redirect, which has no body —
+    // which is why the first live run reported no server timings at all.
     page.on('response', async (r) => {
-      if (!r.url().includes('/macros/s/')) return;
+      const url = r.url();
+      if (!url.includes('/macros/s/') && !url.includes('googleusercontent.com')) return;
       try {
         const body = await r.json();
         if (body && body.data && body.data.timing) serverTimings.push(body.data.timing);
@@ -130,15 +135,22 @@ async function main() {
     await page.waitForSelector('.section-list__item', { timeout: 60000 });
   });
 
-  await step(ctx, 'type an answer (autosave)', async () => {
-    await page.click('.section-list__item');
-    await page.waitForSelector('.cards-wrapper .question__input-slot', { timeout: 60000 });
+  // Opened outside the measured step, so what is timed is the save and not
+  // the navigation before it.
+  await page.click('.section-list__item');
+  await page.waitForSelector('.cards-wrapper .question__input-slot', { timeout: 60000 });
+
+  await step(ctx, 'autosave a typed answer', async () => {
     const box = page.locator('textarea, input[type=text]').first();
-    if (await box.count()) {
-      await box.fill('Scuff on the left wall');
-      // Past the autosave debounce, so the save is included.
-      await page.waitForTimeout(2200);
-    }
+    if (!(await box.count())) return;
+    // Waits for the save to land rather than sleeping past the debounce. A
+    // fixed sleep buried the thing being measured: 2.2 s of waiting reported
+    // as 2.2 s of saving, whatever the save actually cost.
+    const saved = page.waitForResponse(
+      (r) => (r.url().includes('/macros/s/') || r.url().includes('googleusercontent.com')),
+      { timeout: 60000 }).catch(() => null);
+    await box.fill('Scuff on the left wall');
+    await saved;
   });
 
   await step(ctx, 'back to the inspection list', async () => {
