@@ -75,6 +75,22 @@ const UserService = (function () {
     return SheetService.listUsers();
   }
 
+  /**
+   * Just enough to put someone in a dropdown: active accounts, name and
+   * address.
+   *
+   * The admin screen's listUsers is the wrong tool for this. It reads the whole
+   * Devices sheet to count each person's live devices, builds a full public
+   * profile per row, and counts the administrators — all so a form can offer
+   * six names.
+   */
+  function listAssignable() {
+    return SheetService.listUsers()
+      .filter(u => u.status === 'active')
+      .map(u => ({ name: u.name, email: u.email }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
+
   function countActiveAdmins() {
     return listAll().filter(u => u.role === 'admin' && u.status === 'active').length;
   }
@@ -206,6 +222,7 @@ const UserService = (function () {
     getById,
     getByEmail,
     listAll,
+    listAssignable,
     countActiveAdmins,
     create,
     update,

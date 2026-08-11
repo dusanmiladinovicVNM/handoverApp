@@ -61,9 +61,12 @@ const SchemaService = (function () {
     } catch (e) {}
   }
 
+  /**
+   * The four fields a picker needs. The projection was always this narrow; it
+   * is the read underneath that used to fetch whole definitions to build it.
+   */
   function listActiveSchemas() {
-    const rows = SheetService.getActiveSchemas();
-    return rows.map(r => ({
+    return SheetService.getActiveSchemaSummaries().map(r => ({
       schemaId: r.schemaId,
       inspectionType: r.inspectionType,
       title: r.title,

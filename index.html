@@ -15,13 +15,11 @@
   <link rel="icon" type="image/svg+xml" href="./assets/icons/icon.svg" />
   <link rel="apple-touch-icon" href="./assets/icons/icon-192.png" />
 
-  <!-- PT Sans is CPMH's face. Preconnected and swapped so a slow or
-       absent network costs a fallback font, never a blank screen — this
-       app is used in empty flats. -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&display=swap" />
+  <!-- PT Sans, from this origin. It came from fonts.googleapis.com until the
+       performance walk showed what a render-blocking external stylesheet costs
+       when the network is not there: twelve seconds before the sign-in form
+       painted. Self-hosted it is in the service worker's shell. -->
+  <link rel="stylesheet" href="./css/fonts.css" />
 
   <link rel="stylesheet" href="./css/tokens.css" />
   <link rel="stylesheet" href="./css/layout.css" />

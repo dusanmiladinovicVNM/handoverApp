@@ -142,6 +142,9 @@ export const api = {
 
   // --- Schemas ---
   getSchemas: () => call('getSchemas'),
+  // Schemas plus the assignable-user list in one round trip; see the note
+  // on pageAdminNew's load().
+  getNewInspectionOptions: () => call('getNewInspectionOptions'),
   getSchema: (schemaId) => call('getSchema', { schemaId }),
 
   // --- Inspections ---
