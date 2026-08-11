@@ -22,9 +22,34 @@ const SheetService = (function () {
       // place, so a column added in the middle would shift every existing row.
       'assignedTo'
     ],
+    // The original one-row-per-question store. Read by the migration and
+    // nothing else; SectionAnswers replaced it. Kept so the migration can be
+    // re-run and so there is something to compare against if it went wrong.
     Answers: [
       'inspectionId', 'sectionId', 'itemId', 'valueType',
       'value', 'comment', 'attachmentCount', 'updatedAt', 'updatedBy'
+    ],
+    /**
+     * One row per section, holding that section's answers as JSON.
+     *
+     * A row per question made every autosave cost a lock, a full scan of the
+     * sheet and a write *per changed item*: an eight-item save was around
+     * eighteen round trips. It also meant the Answers sheet grew by roughly a
+     * hundred rows per inspection, so opening any inspection read every answer
+     * of every inspection ever made.
+     *
+     * A section's answers are written together, read together and belong to
+     * one editor at a time, so a row is the natural unit. One row per
+     * inspection would have been fewer still, but sections would then contend
+     * for the same cell and a long inspection could approach the 50 000
+     * character limit.
+     *
+     * revision increments on every write and is what makes a concurrent
+     * overwrite detectable rather than silent.
+     */
+    SectionAnswers: [
+      'inspectionId', 'sectionId', 'answersJson', 'revision',
+      'updatedAt', 'updatedBy'
     ],
     Attachments: [
       'attachmentId', 'inspectionId', 'sectionId', 'itemId',
@@ -357,39 +382,133 @@ const SheetService = (function () {
   // Answers
   // ============================================================
 
-  function getAnswersForInspection(inspectionId) {
-    const all = _getAllRows('Answers').map(r => _rowToObject('Answers', r));
-    return all.filter(a => a.inspectionId === inspectionId);
+  /**
+   * A section's answers, as an object keyed by itemId.
+   *
+   * The stored shape. Everything outside this file sees the flat rows below
+   * instead, which is what made moving the storage safe: getAnswersForInspection
+   * still returns one object per question, so getInspection, the PDF and the
+   * lock validation did not have to change at all.
+   */
+  function _parseSection(row) {
+    try {
+      return JSON.parse(row.answersJson || '{}') || {};
+    } catch (e) {
+      Utils.log('ERROR', 'Section answers are not valid JSON', {
+        inspectionId: row.inspectionId, sectionId: row.sectionId, error: e.message,
+      });
+      // Refusing here would make the inspection unopenable. An empty section
+      // is visibly wrong and recoverable; a screen that will not load is not.
+      return {};
+    }
+  }
+
+  function _sectionRows(inspectionId) {
+    return _getAllRows('SectionAnswers')
+      .map(r => _rowToObject('SectionAnswers', r))
+      .filter(r => r.inspectionId === inspectionId);
   }
 
   /**
-   * Upsert an answer by composite key (inspectionId, sectionId, itemId).
-   * Uses a script lock to prevent race conditions on rapid saves.
+   * Every answer of one inspection, one object per question.
+   *
+   * Deliberately the same shape the one-row-per-question store returned, so
+   * that this change is invisible to its callers.
    */
-  function upsertAnswer(answer) {
-    return _withLock(10000, function () {
-      const sheet = _sheet('Answers');
-      const lastRow = sheet.getLastRow();
-      let foundRowIndex = -1;
-      if (lastRow > 1) {
-        // Counted: this runs once per changed item, per autosave.
-        const data = _rawRead(() =>
-          sheet.getRange(2, 1, lastRow - 1, 3).getValues()); // inspectionId, sectionId, itemId
-        for (let i = 0; i < data.length; i++) {
-          if (String(data[i][0]) === answer.inspectionId &&
-              String(data[i][1]) === answer.sectionId &&
-              String(data[i][2]) === answer.itemId) {
-            foundRowIndex = i + 2;
-            break;
-          }
-        }
-      }
-      if (foundRowIndex > 0) {
-        _updateRow('Answers', foundRowIndex, answer);
-      } else {
-        _appendRow('Answers', answer);
-      }
+  function getAnswersForInspection(inspectionId) {
+    const out = [];
+    _sectionRows(inspectionId).forEach(row => {
+      const items = _parseSection(row);
+      Object.keys(items).forEach(itemId => {
+        const item = items[itemId] || {};
+        out.push({
+          inspectionId: row.inspectionId,
+          sectionId: row.sectionId,
+          itemId: itemId,
+          valueType: item.valueType || '',
+          value: item.value === undefined ? '' : item.value,
+          comment: item.comment || '',
+          attachmentCount: Number(item.attachmentCount || 0),
+          updatedAt: item.updatedAt || row.updatedAt,
+          updatedBy: item.updatedBy || row.updatedBy,
+        });
+      });
     });
+    return out;
+  }
+
+  /** What the client must send back to prove it is editing what it read. */
+  function getSectionRevision(inspectionId, sectionId) {
+    const row = _sectionRows(inspectionId).find(r => r.sectionId === sectionId);
+    return row ? Number(row.revision || 0) : 0;
+  }
+
+  /**
+   * Merge answers into one section, in one lock and one write.
+   *
+   * This replaced a loop that took the script lock, scanned the whole Answers
+   * sheet and wrote a row *for every changed item* — about eighteen round trips
+   * for an eight-item save, on the autosave path, while someone waited to leave
+   * the section.
+   *
+   * @param expectedRevision  the revision the caller read. Omit or pass null to
+   *                          skip the check. When given and stale, the write is
+   *                          refused rather than silently overwriting whatever
+   *                          the other editor put there.
+   * @returns { revision, savedItems }
+   */
+  function upsertSectionAnswers(inspectionId, sectionId, items, actor, expectedRevision) {
+    return _withLock(15000, function () {
+      // Read inside the lock: a revision read before it would be exactly the
+      // stale value the check exists to catch.
+      _invalidate('SectionAnswers');
+      const existing = _findRowByKeyPair('SectionAnswers', inspectionId, sectionId);
+      const current = existing ? _parseSection(existing.data) : {};
+      const revision = existing ? Number(existing.data.revision || 0) : 0;
+
+      if (expectedRevision !== null && expectedRevision !== undefined &&
+          Number(expectedRevision) !== revision) {
+        throw new HandoverError('CONFLICT',
+          'This section was changed somewhere else while you were editing it. ' +
+          'Reopen it to see the current answers.',
+          { expectedRevision: Number(expectedRevision), currentRevision: revision });
+      }
+
+      const now = Utils.nowIso();
+      const savedItems = [];
+      Object.keys(items).forEach(itemId => {
+        // Merged, not replaced: a save carries the items that changed, and the
+        // rest of the section has to survive it.
+        current[itemId] = Object.assign({}, current[itemId], items[itemId], {
+          updatedAt: now, updatedBy: actor,
+        });
+        savedItems.push(itemId);
+      });
+
+      const row = {
+        inspectionId: inspectionId,
+        sectionId: sectionId,
+        answersJson: JSON.stringify(current),
+        revision: revision + 1,
+        updatedAt: now,
+        updatedBy: actor,
+      };
+      if (existing) _updateRow('SectionAnswers', existing.rowIndex, row);
+      else _appendRow('SectionAnswers', row);
+
+      return { revision: revision + 1, savedItems: savedItems };
+    });
+  }
+
+  /** Find by the two columns that identify a section. One read. */
+  function _findRowByKeyPair(sheetName, first, second) {
+    const rows = _getAllRows(sheetName);
+    for (let i = 0; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(first) && String(rows[i][1]) === String(second)) {
+        return { rowIndex: i + 2, data: _rowToObject(sheetName, rows[i]) };
+      }
+    }
+    return null;
   }
 
   // ============================================================
@@ -430,33 +549,18 @@ const SheetService = (function () {
   }
 
   /**
-   * After a new attachment is added/deleted, denormalize attachmentCount on the
-   * Answer row so frontend doesn't have to recompute.
+   * Keep the photo count on the answer in step, so the screen does not have to
+   * count attachments itself.
+   *
+   * Writes through the same merge as any other answer, which is why an item
+   * with no answer yet gets one: the count is worth keeping even when nothing
+   * has been typed.
    */
   function recomputeAttachmentCount(inspectionId, sectionId, itemId) {
     const count = countAttachmentsForItem(inspectionId, sectionId, itemId);
-    const sheet = _sheet('Answers');
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) return;
-    const data = _rawRead(() => sheet.getRange(2, 1, lastRow - 1, 3).getValues());
-    for (let i = 0; i < data.length; i++) {
-      if (String(data[i][0]) === inspectionId &&
-          String(data[i][1]) === sectionId &&
-          String(data[i][2]) === itemId) {
-        const colIndex = COLUMNS.Answers.indexOf('attachmentCount') + 1;
-        _write(() => sheet.getRange(i + 2, colIndex).setValue(count));
-        _invalidate('Answers');
-        return;
-      }
-    }
-    // No answer row exists yet — create empty answer row to track the count
-    upsertAnswer({
-      inspectionId, sectionId, itemId,
-      valueType: '', value: '', comment: '',
-      attachmentCount: count,
-      updatedAt: Utils.nowIso(),
-      updatedBy: 'system',
-    });
+    const items = {};
+    items[itemId] = { attachmentCount: count };
+    upsertSectionAnswers(inspectionId, sectionId, items, 'system', null);
   }
 
   // ============================================================
@@ -723,7 +827,8 @@ const SheetService = (function () {
     listInspections,
     // Answers
     getAnswersForInspection,
-    upsertAnswer,
+    getSectionRevision,
+    upsertSectionAnswers,
     // Attachments
     createAttachment,
     getAttachmentsForInspection,

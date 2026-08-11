@@ -24,7 +24,8 @@ import {
 } from './components.js';
 import { toastSuccess, toastError, toastWarning, confirm, openModal } from './ui.js';
 import {
-  getState, setState, setInspectionData, patchAnswer, isAdmin
+  getState, setState, setInspectionData, patchAnswer, isAdmin,
+  setSectionRevision
 } from './state.js';
 import {
   buildAnswersMap, isItemVisible, sectionProgress,
@@ -1585,11 +1586,17 @@ export async function pageInspectionSection({ params }) {
     Object.keys(pendingItems).forEach(k => delete pendingItems[k]);
     setState({ saveStatus: 'saving' });
     updateSaveIndicator();
-    return api.saveSection(inspectionId, sectionId, itemsToSend)
-      .then(() => {
+    return api.saveSection(inspectionId, sectionId, itemsToSend,
+        getState().revisions[sectionId])
+      .then((res) => {
         // Only now is the local copy redundant. A failure leaves it in place,
         // which is what makes the offline case work without any extra code.
         forgetDraft(inspectionId, sectionId, Object.keys(itemsToSend));
+        // The next save must claim the revision this one produced, or it would
+        // look stale to the server and be refused.
+        if (res && typeof res.revision === 'number') {
+          setSectionRevision(sectionId, res.revision);
+        }
         setState({ saveStatus: 'saved', saveError: null });
         updateSaveIndicator();
       })
@@ -1604,6 +1611,16 @@ export async function pageInspectionSection({ params }) {
         updateSaveIndicator();
         // Re-add pending items if save failed
         Object.assign(pendingItems, itemsToSend);
+
+        if (e.code === 'CONFLICT') {
+          // Someone else saved this section while it was open. Retrying would
+          // overwrite their work, which is the thing the revision exists to
+          // stop — so the person is told, and the draft stays on the device so
+          // nothing they typed is lost either way.
+          toastError('This section was changed elsewhere. Reopen it to see the '
+            + 'current answers; what you typed is still saved on this device.');
+          return;
+        }
         toastError('Save failed: ' + (e.code || 'unknown') + ' — ' + (e.message || ''));
       });
   }

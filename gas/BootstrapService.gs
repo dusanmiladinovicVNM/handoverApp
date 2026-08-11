@@ -133,6 +133,72 @@ function migrateAssignedTo() {
 }
 
 /**
+ * Move the answers from one row per question to one row per section.
+ *
+ * Idempotent, and non-destructive: the Answers sheet is read and left alone,
+ * so this can be run again, and the old rows remain to compare against if the
+ * result looks wrong. Delete that sheet by hand once you are satisfied.
+ *
+ * Run once after bootstrapSheet() adds the SectionAnswers tab.
+ */
+function migrateAnswersToSections() {
+  const ss = SpreadsheetApp.openById(Config.getWorkbookId());
+  const sheet = ss.getSheetByName('Answers');
+  if (!sheet) {
+    Logger.log('No Answers sheet — nothing to migrate.');
+    return;
+  }
+  const cols = SheetService.COLUMNS.Answers;
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    Logger.log('Answers sheet is empty — nothing to migrate.');
+    return;
+  }
+
+  const rows = sheet.getRange(2, 1, lastRow - 1, cols.length).getValues();
+  const idx = {};
+  cols.forEach((c, i) => { idx[c] = i; });
+
+  // Group into { inspectionId: { sectionId: { itemId: {...} } } }
+  const grouped = {};
+  rows.forEach(r => {
+    const inspectionId = String(r[idx.inspectionId] || '');
+    const sectionId = String(r[idx.sectionId] || '');
+    const itemId = String(r[idx.itemId] || '');
+    if (!inspectionId || !sectionId || !itemId) return;
+
+    if (!grouped[inspectionId]) grouped[inspectionId] = {};
+    if (!grouped[inspectionId][sectionId]) grouped[inspectionId][sectionId] = {};
+    grouped[inspectionId][sectionId][itemId] = {
+      valueType: r[idx.valueType] || '',
+      value: r[idx.value] === undefined || r[idx.value] === null ? '' : r[idx.value],
+      comment: r[idx.comment] || '',
+      attachmentCount: Number(r[idx.attachmentCount] || 0),
+      updatedAt: r[idx.updatedAt] || '',
+      updatedBy: r[idx.updatedBy] || '',
+    };
+  });
+
+  let sections = 0;
+  let items = 0;
+  Object.keys(grouped).forEach(inspectionId => {
+    Object.keys(grouped[inspectionId]).forEach(sectionId => {
+      const answers = grouped[inspectionId][sectionId];
+      // Through the same path a save takes, so the migration cannot produce a
+      // shape the app would not have written itself. No revision expected: an
+      // existing row is merged into rather than refused.
+      SheetService.upsertSectionAnswers(
+        inspectionId, sectionId, answers, 'migration', null);
+      sections++;
+      items += Object.keys(answers).length;
+    });
+  });
+
+  Logger.log(`Migrated ${items} answer(s) into ${sections} section row(s).`);
+  Logger.log('The Answers sheet is untouched. Compare, then delete it by hand.');
+}
+
+/**
  * Loads initial schemas from SchemaSeed.gs into the Schemas sheet.
  * Run after bootstrapSheet().
  */

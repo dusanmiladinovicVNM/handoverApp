@@ -114,6 +114,14 @@ const InspectionService = (function () {
     const attachmentRows = SheetService.getAttachmentsForInspection(data.inspectionId, false);
     const signatureRows = SheetService.getSignaturesForInspection(data.inspectionId, false);
 
+    // The revision of each section, so the editor can send back the one it
+    // read. Without it a save cannot tell "nothing changed underneath me" from
+    // "someone else saved while I was typing".
+    const revisions = {};
+    (schemaJson.sections || []).forEach(sec => {
+      revisions[sec.id] = SheetService.getSectionRevision(data.inspectionId, sec.id);
+    });
+
     // Pivot answers into nested structure: { sectionId: { itemId: {...} } }
     const answers = {};
     for (const a of answerRows) {
@@ -163,9 +171,22 @@ const InspectionService = (function () {
       inspection,
       schema: schemaJson,
       answers,
+      revisions,
       attachments,
       signatures,
     };
+  }
+
+  /**
+   * A sheet cell holds text. Multi-select answers become JSON, booleans become
+   * the words, and absent becomes empty — the same coercion the per-item loop
+   * did inline, now somewhere it can be read.
+   */
+  function _storedValue(value) {
+    if (Array.isArray(value)) return JSON.stringify(value);
+    if (typeof value === 'boolean') return value ? 'true' : 'false';
+    if (value === undefined || value === null) return '';
+    return String(value);
   }
 
   function saveSection(authCtx, data) {
@@ -187,9 +208,13 @@ const InspectionService = (function () {
     const itemTypeMap = {};
     for (const it of sectionItems) itemTypeMap[it.id] = it.type;
 
-    const savedItems = [];
     const now = Utils.nowIso();
 
+    // Built first, written once. The loop this replaced took the script lock,
+    // scanned the whole Answers sheet and wrote a row for every changed item —
+    // around eighteen round trips for an eight-item save, on the path someone
+    // waits on to leave a section.
+    const toSave = {};
     for (const itemId of Object.keys(data.items)) {
       if (!itemTypeMap[itemId]) {
         // Skip unknown items silently rather than fail the whole save
@@ -197,46 +222,33 @@ const InspectionService = (function () {
         continue;
       }
       const itemData = data.items[itemId];
-      const value = itemData.value;
-      const comment = itemData.comment || '';
-
-      // Stringify multi-select arrays for storage
-      let storedValue;
-      if (Array.isArray(value)) {
-        storedValue = JSON.stringify(value);
-      } else if (typeof value === 'boolean') {
-        storedValue = value ? 'true' : 'false';
-      } else if (value === undefined || value === null) {
-        storedValue = '';
-      } else {
-        storedValue = String(value);
-      }
-
-      const existingCount = SheetService.countAttachmentsForItem(
-        data.inspectionId, data.sectionId, itemId
-      );
-
-      SheetService.upsertAnswer({
-        inspectionId: data.inspectionId,
-        sectionId: data.sectionId,
-        itemId: itemId,
+      toSave[itemId] = {
         valueType: itemTypeMap[itemId],
-        value: storedValue,
-        comment: comment,
-        attachmentCount: existingCount,
-        updatedAt: now,
-        updatedBy: authCtx.actorString,
-      });
-      savedItems.push(itemId);
+        value: _storedValue(itemData.value),
+        comment: itemData.comment || '',
+      };
     }
+
+    // attachmentCount is not touched here. It is maintained by
+    // recomputeAttachmentCount on upload and delete, and the merge leaves
+    // fields it was not given alone — so a save no longer has to count
+    // attachments per item just to avoid clobbering the number.
+    const result = SheetService.upsertSectionAnswers(
+      data.inspectionId, data.sectionId, toSave, authCtx.actorString,
+      data.expectedRevision);
 
     SheetService.updateInspection(data.inspectionId, { updatedAt: now });
     AuditService.log(data.inspectionId, authCtx.actorString, 'section_saved', {
       sectionId: data.sectionId,
-      itemCount: savedItems.length,
+      itemCount: result.savedItems.length,
+      revision: result.revision,
     });
 
-    return { savedItems, updatedAt: now };
+    return {
+      savedItems: result.savedItems,
+      revision: result.revision,
+      updatedAt: now,
+    };
   }
 
   function lockInspection(authCtx, data) {
