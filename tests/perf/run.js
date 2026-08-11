@@ -111,7 +111,16 @@ async function main() {
     await page.fill('input[type=email]', email);
     await page.fill('input[type=password]', password);
     await page.click('button[type=submit]');
-    await page.waitForSelector('.list-item, .empty-state__title', { timeout: 60000 });
+    // The sign-in screen shows its refusal in a banner, so wait for either
+    // outcome rather than only the good one. Waiting for the list alone turned
+    // a wrong password into a silent sixty-second timeout that said nothing
+    // about why — which is a bad way to spend a minute.
+    await page.waitForSelector('.list-item, .empty-state__title, .banner--danger',
+      { timeout: 60000 });
+    const refusal = page.locator('.banner--danger');
+    if (await refusal.count()) {
+      throw new Error('sign-in was refused: ' + (await refusal.first().innerText()).trim());
+    }
   });
 
   await step(ctx, 'open an inspection', async () => {
@@ -208,6 +217,14 @@ function report(results, serverTimings) {
 
 main().catch((e) => {
   console.error('\nperf walk failed:', e.message);
-  console.error('\nIf this is about a missing browser, install one:  npx playwright install chromium');
+  if (/sign-in was refused/.test(e.message)) {
+    console.error('\nThe server answers the same way for a wrong password, an unknown');
+    console.error('address, a disabled account and a locked one — on purpose, so the form');
+    console.error('cannot be used to find out who works here. To rule out a lockout from');
+    console.error('earlier attempts, run setMyPassword() in the Apps Script editor: it');
+    console.error('clears failedCount and lockedUntil as well as setting the password.');
+  } else if (/Cannot find module/.test(e.message)) {
+    console.error('\nInstall the browser:  npx playwright install chromium');
+  }
   process.exit(1);
 });
