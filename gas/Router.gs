@@ -98,12 +98,64 @@ const Router = (function () {
     'getAuditLog': (authCtx, data) => AuditService.getEventsForInspection(authCtx, data),
   };
 
+  /**
+   * Actions after which the client used to turn straight around and call
+   * getInspection.
+   *
+   * Every one of them changes what the inspection screen shows, so the screen
+   * has to be redrawn from something — and the client had no way to get that
+   * something except a second request. On this platform a request is not a few
+   * milliseconds: /exec answers 302 and the body comes from a different host,
+   * so every call is two HTTP round trips plus an execution with its own auth
+   * and its own workbook open. Measured, that is two to four seconds spent
+   * fetching state the server had in its hands a moment earlier.
+   *
+   * Attaching it here rather than in each service keeps the five handlers —
+   * which live in four different files — from each growing their own copy of
+   * getInspection's projection.
+   */
+  const RETURNS_INSPECTION_STATE = {
+    'createInspection': true,
+    'lockInspection': true,
+    'unlockInspection': true,
+    'assignInspection': true,
+    'saveSignature': true,
+    'finalizeInspection': true,
+  };
+
   function dispatch(action, authCtx, data) {
     const handler = ROUTES[action];
     if (!handler) {
       throw new HandoverError('INVALID_REQUEST', `Unknown action: ${action}`);
     }
-    return handler(authCtx, data || {});
+    const result = handler(authCtx, data || {});
+    return _withInspectionState(action, authCtx, data || {}, result);
+  }
+
+  function _withInspectionState(action, authCtx, data, result) {
+    if (!RETURNS_INSPECTION_STATE[action]) return result;
+    if (!result || typeof result !== 'object') return result;
+
+    // createInspection knows the id only from its own reply; the rest were
+    // asked about an inspection by id in the first place.
+    const inspectionId = result.inspectionId || data.inspectionId;
+    if (!inspectionId) return result;
+
+    try {
+      result.state = InspectionService.getInspection(authCtx, {
+        inspectionId: inspectionId,
+      });
+    } catch (e) {
+      // The write already happened. Failing the response now would report a
+      // successful mutation as an error, and the client could not tell which
+      // it was. Dropping the convenience costs a round trip; the client falls
+      // back to fetching, which is what it did before this existed.
+      Utils.log('WARN', `Could not attach state after ${action}`, {
+        inspectionId: inspectionId,
+        error: e && e.message,
+      });
+    }
+    return result;
   }
 
   /** Action names, for diagnostics. */

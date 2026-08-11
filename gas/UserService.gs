@@ -132,9 +132,26 @@ const UserService = (function () {
     return user;
   }
 
+  /**
+   * Write the row, and put the new one in the mirror rather than only dropping
+   * the old one.
+   *
+   * Dropping alone is correct but wasteful on the path it is used most. Signing
+   * in writes lastLoginAt, which cleared both keys — so the very next request,
+   * a second later, found nothing mirrored and read the Users sheet again. The
+   * merged row returned here is the row that was just written, so there is
+   * nothing to go and fetch.
+   *
+   * Note this is a write of the *whole* row, not a patch: updateUser merges the
+   * changes into what it read, so a partial patch never reaches the mirror.
+   */
   function update(userId, updates) {
     const updated = SheetService.updateUser(userId, updates);
     _invalidate(updated);
+    if (updated) {
+      if (updated.userId) AuthMirror.put(_idKey(updated.userId), updated);
+      if (updated.email) AuthMirror.put(_emailKey(updated.email), updated);
+    }
     return updated;
   }
 

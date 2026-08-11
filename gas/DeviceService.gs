@@ -70,7 +70,10 @@ const DeviceService = (function () {
       userAgent: String(userAgent || '').substring(0, 500),
     };
     SheetService.createDevice(device);
-    _invalidate(device.deviceId);
+    // Mirrored, not just invalidated. This row is read on the very next
+    // request — resolving the session that was issued from it — and a device
+    // is brand new, so there is no older copy anywhere to be wrong about.
+    AuthMirror.put(_key(device.deviceId), device);
     return device;
   }
 

@@ -41,6 +41,27 @@ import {
 
 const root = () => document.getElementById('app-root');
 
+/**
+ * Put the inspection a mutation just changed back into state.
+ *
+ * Locking, unlocking, signing, finalising, assigning and creating all change
+ * what these screens show, so each was followed by getInspection to redraw
+ * from. That second call costs two to four seconds here — an Apps Script /exec
+ * answers 302 and serves the body from another host, so one call is two HTTP
+ * round trips and a fresh execution — all to fetch what the server had just
+ * finished writing.
+ *
+ * The server now attaches it as `state`. The fetch is kept as a fallback and
+ * is not dead code: the server drops the attachment rather than fail a write
+ * that already succeeded, and a browser running against an older deployment
+ * will not be sent one at all.
+ */
+async function applyMutationState(result, inspectionId) {
+  const data = (result && result.state) || await api.getInspection(inspectionId);
+  setInspectionData(data);
+  return data;
+}
+
 // ============================================================
 // pageHome — entry routing
 // ============================================================
@@ -943,6 +964,9 @@ const EVENT_LABELS = {
   user_enabled: 'Access restored',
   role_granted: 'Admin rights granted',
   role_revoked: 'Admin rights removed',
+  // Kept for rows already in the sheet. Signing in no longer writes it — it
+  // fired on exactly the same occasions as login_succeeded, which now carries
+  // the device label itself.
   device_registered: 'Device registered',
   device_revoked: 'Device signed out',
 };
@@ -1223,6 +1247,12 @@ export function pageAdminNew() {
     try {
       const res = await api.createInspection(form);
       invalidateCachedList();
+      // Into state before the modal, because its "Start inspection" button
+      // leads to a screen that would otherwise fetch back the inspection this
+      // request just created and returned. No fallback fetch here: this flow
+      // never had one, and adding one against an older deployment would make
+      // creating slower rather than faster.
+      if (res.state) setInspectionData(res.state);
       toastSuccess('Inspection created.');
       // Show the tenant URL in a modal
       showTenantLinkModal(res.inspectionId, res.tenantUrl);
@@ -1849,16 +1879,14 @@ export async function pageReview({ params }) {
     if (!ok) return;
     locking = true; render();
     try {
-      await api.lockInspection(inspectionId);
-      // Reload state
-      const data = await api.getInspection(inspectionId);
-      setInspectionData(data);
+      await applyMutationState(await api.lockInspection(inspectionId), inspectionId);
       toastSuccess('Inspection locked. Ready for signatures.');
       navigate(`/inspection/${inspectionId}/sign`);
     } catch (e) {
       if (e.code === 'VALIDATION_FAILED' && e.details && e.details.missingItems) {
         toastError(`${e.details.missingItems.length} required items missing.`);
-        // Refresh inspection to recompute
+        // The lock was refused, so nothing came back to redraw from — this one
+        // really does have to ask.
         const data = await api.getInspection(inspectionId);
         setInspectionData(data);
       } else {
@@ -2141,8 +2169,7 @@ export async function pageSign({ params }) {
         userAgent: navigator.userAgent,
       });
       toastSuccess('Signature saved.');
-      const data = await api.getInspection(inspectionId);
-      setInspectionData(data);
+      await applyMutationState(result, inspectionId);
     } catch (e) {
       submitting = false;
       updateSubmitButton();
@@ -2213,7 +2240,9 @@ async function offerFinalize(inspectionId) {
   }
   showSpinner('Generating PDF…');
   try {
-    const result = await api.finalizeInspection(inspectionId);
+    // Applied before navigating, so the success screen — which is where the
+    // new PDF's link lives — draws from it instead of fetching it back.
+    await applyMutationState(await api.finalizeInspection(inspectionId), inspectionId);
     toastSuccess('Final PDF ready.');
     navigate(`/inspection/${inspectionId}/success`);
   } catch (e) {
@@ -2228,15 +2257,19 @@ async function offerFinalize(inspectionId) {
 
 export async function pageSuccess({ params }) {
   const inspectionId = params.id;
-  showSpinner('Loading…');
-  let data;
-  try {
-    data = await api.getInspection(inspectionId);
-    setInspectionData(data);
-  } catch (e) {
-    return showError('Could not load inspection', e.message);
+
+  // Same reuse as the other inspection screens. This one is almost always
+  // reached straight after signing or finalising, which have just put the
+  // server's own copy into state — fetching it again was a guaranteed round
+  // trip for something already in hand.
+  if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
+    showSpinner('Loading…');
+    try {
+      setInspectionData(await api.getInspection(inspectionId));
+    } catch (e) {
+      return showError('Could not load inspection', e.message);
+    }
   }
-  const insp = data.inspection;
   const isStaff = getState().authMode === 'user';
 
   let finalizing = false;
@@ -2244,9 +2277,7 @@ export async function pageSuccess({ params }) {
   async function doFinalize() {
     finalizing = true; render();
     try {
-      await api.finalizeInspection(inspectionId);
-      const reloaded = await api.getInspection(inspectionId);
-      setInspectionData(reloaded);
+      await applyMutationState(await api.finalizeInspection(inspectionId), inspectionId);
       toastSuccess('Final PDF generated.');
     } catch (e) {
       toastError(e.message);
@@ -2339,14 +2370,13 @@ function openAssign(inspectionId, currentEmail) {
           onClick: async () => {
             modal.close();
             try {
-              await api.assignInspection(inspectionId, u.email);
+              const res = await api.assignInspection(inspectionId, u.email);
               invalidateCachedList();
               toastSuccess(`Assigned to ${u.name}.`);
-              // Reload rather than patch local state: the server normalises the
-              // address, and showing anything else would be a small lie about
-              // what was stored.
-              const data = await api.getInspection(inspectionId);
-              setInspectionData(data);
+              // The server's own copy rather than a local patch: it normalises
+              // the address and resolves the assignee's name, and showing
+              // anything else would be a small lie about what was stored.
+              await applyMutationState(res, inspectionId);
               navigate('/admin/inspection/' + inspectionId, true);
             } catch (e) {
               toastError(e.message);
@@ -2463,10 +2493,9 @@ export async function pageAdminDetail({ params }) {
                       });
                       if (!ok) return;
                       try {
-                        await api.unlockInspection(inspectionId, 'admin requested');
+                        const res = await api.unlockInspection(inspectionId, 'admin requested');
                         toastSuccess('Unlocked.');
-                        const reloaded = await api.getInspection(inspectionId);
-                        setInspectionData(reloaded);
+                        await applyMutationState(res, inspectionId);
                         render();
                       } catch (e) {
                         toastError(e.message);
