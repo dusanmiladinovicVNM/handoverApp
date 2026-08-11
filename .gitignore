@@ -6,3 +6,7 @@ node_modules/
 # A live perf run needs a real account. The file is the least error-prone way
 # to give it one — see tests/perf/README.md — and must never be committed.
 tests/perf/credentials.json
+
+# `clasp pull` writes .js copies of every server file next to the .gs original.
+# Committing them would leave Apps Script holding both, and a stale copy of each.
+gas/*.js
