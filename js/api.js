@@ -150,8 +150,11 @@ export const api = {
   // --- Inspections ---
   createInspection: (data) => call('createInspection', data),
   getInspection: (inspectionId) => call('getInspection', { inspectionId }),
-  saveSection: (inspectionId, sectionId, items) =>
-    call('saveSection', { inspectionId, sectionId, items }),
+  // expectedRevision is what the editor read when it opened the section. The
+  // server refuses the write if the section moved on in the meantime, rather
+  // than overwriting whatever the other editor put there.
+  saveSection: (inspectionId, sectionId, items, expectedRevision) =>
+    call('saveSection', { inspectionId, sectionId, items, expectedRevision }),
   lockInspection: (inspectionId) => call('lockInspection', { inspectionId }),
   unlockInspection: (inspectionId, reason) =>
     call('unlockInspection', { inspectionId, reason }),

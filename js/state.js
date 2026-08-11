@@ -27,6 +27,9 @@ const _state = {
   inspection: null,
   schema: null,
   answers: {},
+  // Per section, the revision the server had when this data was fetched. Sent
+  // back on save so a concurrent edit is refused rather than silently lost.
+  revisions: {},
   attachments: [],
   signatures: [],
 
@@ -66,6 +69,7 @@ export function setInspectionData(payload) {
     inspection: payload.inspection,
     schema: payload.schema,
     answers: payload.answers || {},
+    revisions: payload.revisions || {},
     attachments: payload.attachments || [],
     signatures: payload.signatures || [],
     saveStatus: 'idle',
@@ -77,6 +81,13 @@ export function setInspectionData(payload) {
  * Local update: merge new answers into state without round-trip.
  * Used by autosave optimistic update.
  */
+/** Record the revision the server returned, so the next save is not stale. */
+export function setSectionRevision(sectionId, revision) {
+  const revisions = { ..._state.revisions };
+  revisions[sectionId] = revision;
+  setState({ revisions });
+}
+
 export function patchAnswer(sectionId, itemId, patch) {
   const answers = { ..._state.answers };
   if (!answers[sectionId]) answers[sectionId] = {};

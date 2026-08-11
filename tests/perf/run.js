@@ -51,6 +51,35 @@ function chromium() {
   return pw.chromium.launch(candidates.length ? { executablePath: candidates[0] } : {});
 }
 
+/**
+ * Who to sign in as, for a live run.
+ *
+ * From tests/perf/credentials.json if it exists, otherwise the environment.
+ * The file exists because the environment route kept going wrong in a way that
+ * had nothing to do with this app: `read -s PERF_PASSWORD` followed by the
+ * command on the next line means that, when the two are pasted together, read
+ * swallows the command and uses it as the password. A file is edited once and
+ * then forgotten, and it is in .gitignore.
+ *
+ *   { "email": "you@firma.rs", "password": "…" }
+ */
+function credentials() {
+  const file = path.join(__dirname, 'credentials.json');
+  if (fs.existsSync(file)) {
+    try {
+      const c = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (c.email && c.password) return c;
+      console.error('credentials.json is missing "email" or "password".');
+    } catch (e) {
+      console.error('credentials.json is not valid JSON:', e.message);
+    }
+  }
+  return {
+    email: process.env.PERF_EMAIL || 'perf@firma.rs',
+    password: process.env.PERF_PASSWORD || 'correct horse battery staple',
+  };
+}
+
 /** One measured step. */
 async function step(ctx, name, fn) {
   const before = ctx.calls.length;
@@ -77,8 +106,13 @@ async function main() {
       if (!r.url().includes('/macros/s/')) return;
       try { calls.push(JSON.parse(r.postData() || '{}').action || '(none)'); } catch (_) {}
     });
+    // The request goes to /macros/s/…/exec, which answers 302 and sends the
+    // body from script.googleusercontent.com. Filtering responses on the
+    // request URL therefore matched only the redirect, which has no body —
+    // which is why the first live run reported no server timings at all.
     page.on('response', async (r) => {
-      if (!r.url().includes('/macros/s/')) return;
+      const url = r.url();
+      if (!url.includes('/macros/s/') && !url.includes('googleusercontent.com')) return;
       try {
         const body = await r.json();
         if (body && body.data && body.data.timing) serverTimings.push(body.data.timing);
@@ -90,8 +124,7 @@ async function main() {
   const ctx = { calls, results: [] };
   const base = `http://127.0.0.1:${PORT}/index.html`;
 
-  const email = process.env.PERF_EMAIL || 'perf@firma.rs';
-  const password = process.env.PERF_PASSWORD || 'correct horse battery staple';
+  const { email, password } = credentials();
 
   await step(ctx, 'cold load → sign-in screen', async () => {
     // domcontentloaded, not load: waiting for every subresource includes the
@@ -106,7 +139,16 @@ async function main() {
     await page.fill('input[type=email]', email);
     await page.fill('input[type=password]', password);
     await page.click('button[type=submit]');
-    await page.waitForSelector('.list-item, .empty-state__title', { timeout: 60000 });
+    // The sign-in screen shows its refusal in a banner, so wait for either
+    // outcome rather than only the good one. Waiting for the list alone turned
+    // a wrong password into a silent sixty-second timeout that said nothing
+    // about why — which is a bad way to spend a minute.
+    await page.waitForSelector('.list-item, .empty-state__title, .banner--danger',
+      { timeout: 60000 });
+    const refusal = page.locator('.banner--danger');
+    if (await refusal.count()) {
+      throw new Error('sign-in was refused: ' + (await refusal.first().innerText()).trim());
+    }
   });
 
   await step(ctx, 'open an inspection', async () => {
@@ -130,15 +172,22 @@ async function main() {
     await page.waitForSelector('.section-list__item', { timeout: 60000 });
   });
 
-  await step(ctx, 'type an answer (autosave)', async () => {
-    await page.click('.section-list__item');
-    await page.waitForSelector('.cards-wrapper .question__input-slot', { timeout: 60000 });
+  // Opened outside the measured step, so what is timed is the save and not
+  // the navigation before it.
+  await page.click('.section-list__item');
+  await page.waitForSelector('.cards-wrapper .question__input-slot', { timeout: 60000 });
+
+  await step(ctx, 'autosave a typed answer', async () => {
     const box = page.locator('textarea, input[type=text]').first();
-    if (await box.count()) {
-      await box.fill('Scuff on the left wall');
-      // Past the autosave debounce, so the save is included.
-      await page.waitForTimeout(2200);
-    }
+    if (!(await box.count())) return;
+    // Waits for the save to land rather than sleeping past the debounce. A
+    // fixed sleep buried the thing being measured: 2.2 s of waiting reported
+    // as 2.2 s of saving, whatever the save actually cost.
+    const saved = page.waitForResponse(
+      (r) => (r.url().includes('/macros/s/') || r.url().includes('googleusercontent.com')),
+      { timeout: 60000 }).catch(() => null);
+    await box.fill('Scuff on the left wall');
+    await saved;
   });
 
   await step(ctx, 'back to the inspection list', async () => {
@@ -196,6 +245,14 @@ function report(results, serverTimings) {
 
 main().catch((e) => {
   console.error('\nperf walk failed:', e.message);
-  console.error('\nIf this is about a missing browser, install one:  npx playwright install chromium');
+  if (/sign-in was refused/.test(e.message)) {
+    console.error('\nThe server answers the same way for a wrong password, an unknown');
+    console.error('address, a disabled account and a locked one — on purpose, so the form');
+    console.error('cannot be used to find out who works here. To rule out a lockout from');
+    console.error('earlier attempts, run setMyPassword() in the Apps Script editor: it');
+    console.error('clears failedCount and lockedUntil as well as setting the password.');
+  } else if (/Cannot find module/.test(e.message)) {
+    console.error('\nInstall the browser:  npx playwright install chromium');
+  }
   process.exit(1);
 });

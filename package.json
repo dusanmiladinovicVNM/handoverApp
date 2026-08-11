@@ -1,0 +1,13 @@
+{
+  "name": "handover-app",
+  "private": true,
+  "description": "Apartment handover inspections. See README.md.",
+  "scripts": {
+    "test": "node tests/run.js",
+    "perf": "node tests/perf/run.js",
+    "perf:live": "node tests/perf/run.js --live"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}
