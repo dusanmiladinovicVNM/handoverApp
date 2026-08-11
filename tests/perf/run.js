@@ -51,6 +51,35 @@ function chromium() {
   return pw.chromium.launch(candidates.length ? { executablePath: candidates[0] } : {});
 }
 
+/**
+ * Who to sign in as, for a live run.
+ *
+ * From tests/perf/credentials.json if it exists, otherwise the environment.
+ * The file exists because the environment route kept going wrong in a way that
+ * had nothing to do with this app: `read -s PERF_PASSWORD` followed by the
+ * command on the next line means that, when the two are pasted together, read
+ * swallows the command and uses it as the password. A file is edited once and
+ * then forgotten, and it is in .gitignore.
+ *
+ *   { "email": "you@firma.rs", "password": "…" }
+ */
+function credentials() {
+  const file = path.join(__dirname, 'credentials.json');
+  if (fs.existsSync(file)) {
+    try {
+      const c = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (c.email && c.password) return c;
+      console.error('credentials.json is missing "email" or "password".');
+    } catch (e) {
+      console.error('credentials.json is not valid JSON:', e.message);
+    }
+  }
+  return {
+    email: process.env.PERF_EMAIL || 'perf@firma.rs',
+    password: process.env.PERF_PASSWORD || 'correct horse battery staple',
+  };
+}
+
 /** One measured step. */
 async function step(ctx, name, fn) {
   const before = ctx.calls.length;
@@ -95,8 +124,7 @@ async function main() {
   const ctx = { calls, results: [] };
   const base = `http://127.0.0.1:${PORT}/index.html`;
 
-  const email = process.env.PERF_EMAIL || 'perf@firma.rs';
-  const password = process.env.PERF_PASSWORD || 'correct horse battery staple';
+  const { email, password } = credentials();
 
   await step(ctx, 'cold load → sign-in screen', async () => {
     // domcontentloaded, not load: waiting for every subresource includes the

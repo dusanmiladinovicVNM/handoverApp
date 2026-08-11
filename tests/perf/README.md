@@ -32,11 +32,21 @@ so each row carries the server's own breakdown (`authMs`, `reads`, `writes`,
 `lockWaitMs`, `driveMs`) next to the time the browser observed. The gap between
 those two is transport, redirect and cold start.
 
-Live runs need credentials, and they are not in the repo:
+Live runs need credentials, and they are not in the repo. Put them in
+`tests/perf/credentials.json`, which is gitignored:
 
+```json
+{ "email": "you@firma.rs", "password": "your password" }
 ```
-PERF_EMAIL=you@firma.rs PERF_PASSWORD='…' node tests/perf/run.js --live
-```
+
+Then `npm run perf:live` needs nothing else.
+
+A file rather than environment variables, because the obvious shell recipe is
+a trap: `read -s PERF_PASSWORD` on one line and the command on the next means
+that pasting both together makes `read` swallow the command and use it as the
+password. The run then fails to sign in, for a reason that has nothing to do
+with the app. Environment variables still work if you prefer them —
+`PERF_EMAIL` and `PERF_PASSWORD` — but type them, do not paste them.
 
 A live run signs in for real. Point it at a test account, not one whose lockout
 counter you care about.

@@ -2,3 +2,7 @@
 .clasp.json
 
 node_modules/
+
+# A live perf run needs a real account. The file is the least error-prone way
+# to give it one — see tests/perf/README.md — and must never be committed.
+tests/perf/credentials.json
