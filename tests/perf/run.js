@@ -80,6 +80,33 @@ function credentials() {
   };
 }
 
+/**
+ * The statuses in which an inspection can still be typed into.
+ *
+ * ValidationService.CONTENT_EDITABLE is the original; this is a copy, because
+ * the harness is Node and that is Apps Script. Should they drift, the walk
+ * picks a row it cannot edit and says so by name rather than timing out on a
+ * disabled input, which is the failure this exists to avoid.
+ */
+const CONTENT_EDITABLE = ['draft', 'under_review'];
+
+/**
+ * An error the walk raised itself, labelled with what it was.
+ *
+ * explain() used to work out what happened by looking for words in the message,
+ * and Playwright messages contain a dump of the element — so a locked
+ * inspection's `<input disabled …>` matched the pattern for a disabled account,
+ * and the walk advised resetting a password over a failure that had nothing to
+ * do with one. Twice now the guidance has been confidently wrong about a
+ * failure it did not recognise. Only errors raised here carry a kind; anything
+ * else gets no advice at all, which is the honest answer.
+ */
+function tagged(kind, message) {
+  const e = new Error(message);
+  e.perfKind = kind;
+  return e;
+}
+
 /** One measured step. */
 async function step(ctx, name, fn) {
   const before = ctx.calls.length;
@@ -164,12 +191,23 @@ async function main() {
       // that has moved, a timeout, an HTML error page — and calling those a
       // refusal is what sent someone to reset a password over a broken URL.
       const text = (await refusal.first().innerText()).trim();
-      throw new Error(`sign-in did not complete: ${text}`);
+      throw tagged('signin', `sign-in did not complete: ${text}`);
     }
   });
 
+  // The walk types into an inspection, so it needs one still open for editing.
+  // It used to click whichever row was on top, which after locking one meant
+  // filling a disabled input and waiting thirty seconds to be told the element
+  // was not enabled.
+  const editable = page.locator(
+    CONTENT_EDITABLE.map(s => `.list-item[data-status="${s}"]`).join(', '));
+
   await step(ctx, 'open an inspection', async () => {
-    await page.click('.list-item');
+    if (!(await editable.count())) {
+      throw tagged('no-draft',
+        'Every inspection in the list is locked, signed or archived.');
+    }
+    await editable.first().click();
     await page.waitForSelector('text=Open editor', { timeout: 60000 });
   });
 
@@ -294,15 +332,40 @@ function report(results, serverTimings) {
 }
 
 /**
- * Say what actually went wrong, which is not always what it looks like.
+ * Say what actually went wrong, when it is known.
  *
- * This used to print the password advice for every failed sign-in, and one run
- * failed with HTTP 404 — a deployment that was not answering, where the server
- * never saw a password at all. The advice sent someone to reset a working
- * password over a broken URL. The failures below are told apart because
- * confidently wrong guidance costs more than none.
+ * This started out matching words in the message and has been wrong twice, both
+ * times confidently. It printed the password advice for an HTTP 404, where the
+ * server never saw a password; and then again for a locked inspection, because
+ * Playwright puts the element in the message and `<input disabled …>` contains
+ * the word it was looking for.
+ *
+ * So a kind is only trusted when the walk set it. The patterns below run over
+ * the *sign-in banner* — text this app wrote, not an arbitrary stack — and
+ * anything else gets nothing, which is the honest answer.
  */
-function explain(message) {
+function explain(error) {
+  const message = (error && error.message) || String(error);
+  const kind = error && error.perfKind;
+
+  if (kind === 'no-draft') {
+    return [
+      'The walk types into an inspection, and there is none it may type into.',
+      '',
+      'Create one with + New and leave it empty — it sorts to the top and the',
+      'walk fills in a single answer, which is what it is there to measure.',
+    ];
+  }
+
+  if (kind !== 'signin') {
+    // Playwright's own failures. No guess is offered about what the app was
+    // doing, because the last two guesses were wrong.
+    if (/Cannot find module/.test(message)) {
+      return ['Install the browser:  npx playwright install chromium'];
+    }
+    return [];
+  }
+
   if (/HTTP \d+/.test(message)) {
     return [
       'That is the backend not answering, not a password problem — the server',
@@ -328,25 +391,21 @@ function explain(message) {
       'log in the Apps Script editor for the stack.',
     ];
   }
-  if (/Incorrect email address or password|no longer valid|disabled|Too many/.test(message)) {
-    return [
-      'The server answers the same way for a wrong password, an unknown address,',
-      'a disabled account and a locked one — on purpose, so the form cannot be',
-      'used to find out who works here.',
-      '',
-      'whyCantISignIn("you@firma.rs") in the Apps Script editor says which of',
-      'them it is. It asks for no password.',
-    ];
-  }
-  if (/Cannot find module/.test(message)) {
-    return ['Install the browser:  npx playwright install chromium'];
-  }
-  return [];
+  // Whatever is left is the server having judged the credentials: the banner
+  // carried a sign-in refusal and none of the transport cases matched.
+  return [
+    'The server answers the same way for a wrong password, an unknown address,',
+    'a disabled account and a locked one — on purpose, so the form cannot be',
+    'used to find out who works here.',
+    '',
+    'whyCantISignIn("you@firma.rs") in the Apps Script editor says which of',
+    'them it is. It asks for no password.',
+  ];
 }
 
 main().catch((e) => {
   console.error('\nperf walk failed:', e.message);
-  const lines = explain(e.message);
+  const lines = explain(e);
   if (lines.length) console.error('\n' + lines.join('\n'));
   process.exit(1);
 });
