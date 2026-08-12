@@ -1161,3 +1161,132 @@ function _columnLetter(index) {
   }
   return out;
 }
+
+/**
+ * Whether batchGet returns the same data getValues does, cell for cell.
+ *
+ * This has to be settled before anything reads through the Sheets API, and it
+ * cannot be settled by reasoning. Five places in SheetService compare against
+ * the literal `true`:
+ *
+ *   a.deleted !== true      an attachment removed from a signed report
+ *   s.valid === true        a signature that counts
+ *   s.active === true       a schema the app can find at all
+ *
+ * If the values arrive as the text 'TRUE' rather than as booleans, every one of
+ * those flips silently. The first is the worst thing this app could do: a
+ * photograph deleted from an inspection reappearing in the evidence.
+ *
+ * Two known differences are checked for by name, because both are quiet:
+ *
+ *   Types. batchGet renders as displayed unless asked otherwise, so numbers and
+ *   booleans come back as text. UNFORMATTED_VALUE is meant to prevent that, and
+ *   this confirms it rather than trusting it.
+ *
+ *   Ragged rows. batchGet stops at the last cell with anything in it, so a row
+ *   whose trailing columns are empty comes back short — and _rowToObject
+ *   indexes by position, so the missing fields become undefined instead of ''.
+ *   A row of answers ending in an empty comment is enough to trigger it.
+ */
+function checkBatchGetFidelity() {
+  if (typeof Sheets === 'undefined') {
+    Logger.log('The Sheets advanced service is not enabled — see benchmarkSheetReads().');
+    return;
+  }
+
+  const workbookId = Config.getWorkbookId();
+  const ss = SpreadsheetApp.openById(workbookId);
+  const names = Object.keys(SheetService.COLUMNS);
+
+  let problems = 0;
+  let ragged = 0;
+  let compared = 0;
+
+  names.forEach(function (name) {
+    const width = SheetService.COLUMNS[name].length;
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) {
+      Logger.log(`- ${name}: not in the workbook, skipped`);
+      return;
+    }
+    const lastRow = sheet.getLastRow();
+    if (lastRow <= 1) {
+      Logger.log(`- ${name}: empty, nothing to compare`);
+      return;
+    }
+
+    const viaApp = sheet.getRange(2, 1, lastRow - 1, width).getValues();
+    const range = `${name}!A2:${_columnLetter(width)}${lastRow}`;
+    const answer = Sheets.Spreadsheets.Values.batchGet(workbookId, {
+      ranges: [range],
+      // The two options this whole exercise turns on.
+      valueRenderOption: 'UNFORMATTED_VALUE',
+      dateTimeRenderOption: 'FORMATTED_STRING',
+    });
+    const viaApi = (answer.valueRanges[0] || {}).values || [];
+
+    if (viaApi.length !== viaApp.length) {
+      Logger.log(`✗ ${name}: ${viaApp.length} rows via getValues, ${viaApi.length} via batchGet`);
+      problems++;
+    }
+
+    const rows = Math.min(viaApp.length, viaApi.length);
+    for (let r = 0; r < rows; r++) {
+      if ((viaApi[r] || []).length < width) ragged++;
+      for (let c = 0; c < width; c++) {
+        const a = viaApp[r][c];
+        // A short row means an empty trailing cell, which getValues gives as ''.
+        const b = (viaApi[r] || []).length > c ? viaApi[r][c] : '';
+        compared++;
+
+        // Dates are the one place a difference is expected and harmless: this
+        // app writes them as ISO text, but a cell someone formatted as a date
+        // comes back as a Date object one way and a string the other. Compared
+        // as text, since that is how every reader of them treats them.
+        if (a instanceof Date) {
+          if (String(b) === '') {
+            Logger.log(`✗ ${name} row ${r + 2} col ${SheetService.COLUMNS[name][c]}: `
+              + `a date via getValues, empty via batchGet`);
+            problems++;
+          }
+          continue;
+        }
+
+        if (typeof a !== typeof b) {
+          Logger.log(`✗ ${name} row ${r + 2} col ${SheetService.COLUMNS[name][c]}: `
+            + `${typeof a} ${JSON.stringify(a)} via getValues, `
+            + `${typeof b} ${JSON.stringify(b)} via batchGet`);
+          problems++;
+          continue;
+        }
+        if (a !== b) {
+          Logger.log(`✗ ${name} row ${r + 2} col ${SheetService.COLUMNS[name][c]}: `
+            + `${JSON.stringify(a)} vs ${JSON.stringify(b)}`);
+          problems++;
+        }
+      }
+    }
+  });
+
+  Logger.log('');
+  Logger.log(`Compared ${compared} cells across ${names.length} sheets.`);
+  Logger.log(`${ragged} row(s) came back short and were padded to compare.`);
+  Logger.log('');
+
+  if (problems === 0) {
+    Logger.log('No differences. batchGet with UNFORMATTED_VALUE returns what');
+    Logger.log('getValues returns, so the read path can move to it — as long as');
+    Logger.log('short rows are padded to the column count on the way in. They are');
+    Logger.log(ragged > 0
+      ? `real in this workbook: ${ragged} row(s) above.`
+      : 'absent here only because no row happens to end in an empty cell — which');
+    if (ragged === 0) {
+      Logger.log('is luck, not a property. Pad regardless.');
+    }
+    return;
+  }
+
+  Logger.log(`${problems} difference(s). Do not move the read path until each is`);
+  Logger.log('understood — five comparisons in SheetService are against the literal');
+  Logger.log("true, and a string 'TRUE' passes none of them.");
+}
