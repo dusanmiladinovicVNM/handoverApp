@@ -1150,17 +1150,16 @@ function benchmarkSheetReads() {
   Logger.log('which is a second cost to weigh and not a detail.');
 }
 
-/** A1 column letter for a 1-based index. Handles the AA.. range. */
+/**
+ * A1 column letter, delegated so there is one implementation.
+ *
+ * SheetService needs it to build ranges, and these diagnostics need the same
+ * answer. Two copies would agree until one of them was corrected.
+ */
 function _columnLetter(index) {
-  let n = index;
-  let out = '';
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    out = String.fromCharCode(65 + rem) + out;
-    n = Math.floor((n - 1) / 26);
-  }
-  return out;
+  return SheetService.columnLetter(index);
 }
+
 
 /**
  * Whether batchGet returns the same data getValues does, cell for cell.

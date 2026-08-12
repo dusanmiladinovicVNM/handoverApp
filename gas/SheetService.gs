@@ -269,19 +269,165 @@ const SheetService = (function () {
     delete _rowCache[sheetName];
   }
 
+  /** A1 column letter for a 1-based index. Handles the AA.. range. */
+  function columnLetter(index) {
+    let n = index;
+    let out = '';
+    while (n > 0) {
+      const rem = (n - 1) % 26;
+      out = String.fromCharCode(65 + rem) + out;
+      n = Math.floor((n - 1) / 26);
+    }
+    return out;
+  }
+
+  /**
+   * Whether the Sheets advanced service is available to read through.
+   *
+   * Checked rather than assumed, because a deployment where it was never
+   * enabled must still work. Falling back is slower; failing is not an option
+   * for a read path the whole app sits on.
+   */
+  function _canBatch() {
+    return typeof Sheets !== 'undefined'
+      && Sheets && Sheets.Spreadsheets && Sheets.Spreadsheets.Values;
+  }
+
+  /**
+   * batchGet omits trailing empty cells, so a row whose last columns are blank
+   * comes back short — and _rowToObject indexes by position, which would turn
+   * those fields into undefined rather than ''. Eleven rows of the live
+   * workbook were short when this was measured; one answer ending in an empty
+   * comment is enough.
+   */
+  function _padRows(rows, width) {
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      for (let c = row.length; c < width; c++) row[c] = '';
+    }
+    return rows;
+  }
+
+  /**
+   * Read whole sheets in one request.
+   *
+   * Measured against the SpreadsheetApp path on the four sheets getInspection
+   * needs: 525 ms to open the workbook plus 561 median to read, against 150
+   * median for one batchGet. The spread matters more than the median — the old
+   * path ranged 214 to 934 across five rounds, this one 138 to 156.
+   *
+   * There is no open to pay because nothing is opened, and no getLastRow
+   * either: an open-ended range returns what is there.
+   *
+   * UNFORMATTED_VALUE is not optional. Without it every value arrives as
+   * displayed text, and five comparisons in this file are against the literal
+   * true — a deleted attachment would become visible again on a signed report.
+   * Confirmed against 5 603 cells of the live workbook before this was written.
+   */
+  function _fetchRows(names) {
+    if (!_canBatch()) {
+      names.forEach(function (name) {
+        _rowCache[name] = _rawRead(function () {
+          const sheet = _sheet(name);
+          const lastRow = sheet.getLastRow();
+          return lastRow <= 1
+            ? []
+            : sheet.getRange(2, 1, lastRow - 1, COLUMNS[name].length).getValues();
+        });
+      });
+      return;
+    }
+
+    _rawRead(function () {
+      const answer = Sheets.Spreadsheets.Values.batchGet(Config.getWorkbookId(), {
+        ranges: names.map(n => `${n}!A2:${columnLetter(COLUMNS[n].length)}`),
+        valueRenderOption: 'UNFORMATTED_VALUE',
+        dateTimeRenderOption: 'FORMATTED_STRING',
+      });
+
+      // Matched by the range each result names, not by position. The API does
+      // return them in order, but a silent mis-pairing here would read the
+      // Users sheet as Inspections, and that is not a risk worth taking to save
+      // a string split.
+      const seen = {};
+      (answer.valueRanges || []).forEach(function (vr) {
+        const name = String(vr.range || '').split('!')[0].replace(/^'|'$/g, '');
+        if (!COLUMNS[name]) return;
+        seen[name] = true;
+        _rowCache[name] = _padRows(vr.values || [], COLUMNS[name].length);
+      });
+
+      // A sheet the workbook does not have comes back missing rather than
+      // empty. Saying so beats handing out [] and letting a caller conclude
+      // there are no users.
+      names.forEach(function (name) {
+        if (!seen[name]) {
+          throw new HandoverError('INTERNAL_ERROR',
+            `Sheet '${name}' not found. Run bootstrapSheet().`);
+        }
+      });
+    });
+  }
+
+  /**
+   * One A1 range, for the paths that deliberately read less than a whole sheet.
+   *
+   * Those paths were left on SpreadsheetApp when whole-sheet reads moved, and
+   * it showed: a walk that should have reported open at zero reported 210 ms,
+   * because a schema lookup still opened the workbook to read two ranges out of
+   * it. Reading narrowly is worth it — a Schemas row carries an entire form
+   * definition — but not at the price of an open.
+   */
+  function _readRange(sheetName, startRow, startCol, numRows, numCols) {
+    // Built once from the same arguments both paths use. Handing the batch path
+    // an A1 string and the fallback a set of offsets would let the two describe
+    // different ranges, and the fallback is the one nobody runs — so it would
+    // be wrong for a long time before anyone noticed.
+    const firstCol = columnLetter(startCol);
+    const lastCol = columnLetter(startCol + numCols - 1);
+    const endRow = numRows ? String(startRow + numRows - 1) : '';
+    const a1 = `${sheetName}!${firstCol}${startRow}:${lastCol}${endRow}`;
+
+    if (!_canBatch()) {
+      return _rawRead(function () {
+        const sheet = _sheet(sheetName);
+        const lastRow = sheet.getLastRow();
+        const rows = numRows || (lastRow - startRow + 1);
+        if (rows <= 0) return [];
+        return sheet.getRange(startRow, startCol, rows, numCols).getValues();
+      });
+    }
+    return _rawRead(function () {
+      const answer = Sheets.Spreadsheets.Values.batchGet(Config.getWorkbookId(), {
+        ranges: [a1],
+        valueRenderOption: 'UNFORMATTED_VALUE',
+        dateTimeRenderOption: 'FORMATTED_STRING',
+      });
+      const values = ((answer.valueRanges || [])[0] || {}).values || [];
+      return _padRows(values, numCols);
+    });
+  }
+
   function _getAllRows(sheetName) {
     if (_rowCache[sheetName]) return _rowCache[sheetName];
+    _fetchRows([sheetName]);
+    return _rowCache[sheetName];
+  }
 
-    const rows = _rawRead(function () {
-      const sheet = _sheet(sheetName);
-      const lastRow = sheet.getLastRow();
-      return lastRow <= 1
-        ? []
-        : sheet.getRange(2, 1, lastRow - 1, COLUMNS[sheetName].length).getValues();
-    });
-
-    _rowCache[sheetName] = rows;
-    return rows;
+  /**
+   * Fetch several sheets together, before anything asks for them.
+   *
+   * This is where the saving actually is. Read one at a time, four sheets are
+   * four requests; named together they are one. A handler that knows what it
+   * needs should say so — getInspection does — and anything not prefetched
+   * still works, just at one request each.
+   *
+   * Sheets already in the cache are not re-read, so calling this twice, or
+   * naming something already fetched, costs nothing.
+   */
+  function prefetch(names) {
+    const missing = (names || []).filter(n => COLUMNS[n] && !_rowCache[n]);
+    if (missing.length > 0) _fetchRows(missing);
   }
 
   /**
@@ -326,23 +472,26 @@ const SheetService = (function () {
     return null;
   }
 
+  /**
+   * The key column, then the one row that matched.
+   *
+   * Two round trips instead of one, moving a fraction of the bytes: a Schemas
+   * row holds a whole form definition, and reading every row to find one pulls
+   * every form in the workbook. The second range cannot be named until the
+   * first has been read, so this is genuinely sequential and not a batch that
+   * was missed.
+   */
   function _findRowNarrow(sheetName, colIndex, needle) {
-    return _rawRead(function () {
-      const sheet = _sheet(sheetName);
-      const lastRow = sheet.getLastRow();
-      if (lastRow <= 1) return null;
+    const width = COLUMNS[sheetName].length;
+    const keys = _readRange(sheetName, 2, colIndex + 1, null, 1);
 
-      const keys = sheet.getRange(2, colIndex + 1, lastRow - 1, 1).getValues();
-      for (let i = 0; i < keys.length; i++) {
-        if (String(keys[i][0]) !== needle) continue;
-        const rowIndex = i + 2;
-        const row = sheet.getRange(rowIndex, 1, 1, COLUMNS[sheetName].length).getValues()[0];
-        // The key column and the row are two round trips; _rawRead counts one.
-        _stats.reads += 1;
-        return { rowIndex: rowIndex, data: _rowToObject(sheetName, row) };
-      }
-      return null;
-    });
+    for (let i = 0; i < keys.length; i++) {
+      if (String(keys[i][0]) !== needle) continue;
+      const rowIndex = i + 2;
+      const rows = _readRange(sheetName, rowIndex, 1, 1, width);
+      return { rowIndex: rowIndex, data: _rowToObject(sheetName, rows[0] || []) };
+    }
+    return null;
   }
 
   function _appendRow(sheetName, obj) {
@@ -680,11 +829,8 @@ const SheetService = (function () {
     const wanted = ['schemaId', 'inspectionType', 'version', 'active', 'title'];
     const last = Math.max.apply(null, wanted.map(c => cols.indexOf(c))) + 1;
 
-    const sheet = _sheet('Schemas');
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) return [];
-
-    const rows = _rawRead(() => sheet.getRange(2, 1, lastRow - 1, last).getValues());
+    // Was the other path still opening the workbook to read part of a sheet.
+    const rows = _readRange('Schemas', 2, 1, null, last);
     return rows
       .map(r => {
         const o = {};
@@ -851,6 +997,8 @@ const SheetService = (function () {
 
   return {
     COLUMNS,
+    columnLetter,
+    prefetch,
     // Inspections
     createInspection,
     getInspection,
