@@ -28,6 +28,7 @@ const suites = [
   ['Account administration', require('./user-admin.test')],
   ['Local drafts', require('./drafts.test')],
   ['Inspection lifecycle', require('./lifecycle.test')],
+  ['Reading the final PDF', require('./pdf-download.test')],
   ['Markup safety', require('./markup.test')],
 ];
 

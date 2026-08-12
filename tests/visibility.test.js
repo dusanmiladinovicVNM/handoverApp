@@ -89,6 +89,7 @@ module.exports = function run() {
     ['AttachmentService.gs', 'deleteAttachment'],
     ['SignatureService.gs', 'saveSignature'],
     ['PdfService.gs', 'finalizeInspection'],
+    ['PdfService.gs', 'downloadPdf'],
     ['AuditService.gs', 'getEventsForInspection'],
   ].forEach(([file, name]) => {
     check(`${name} does`, () => {

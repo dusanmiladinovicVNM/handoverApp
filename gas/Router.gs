@@ -95,6 +95,10 @@ const Router = (function () {
     'deleteAttachment': (authCtx, data) => AttachmentService.deleteAttachment(authCtx, data),
     'saveSignature': (authCtx, data) => SignatureService.saveSignature(authCtx, data),
     'finalizeInspection': (authCtx, data) => PdfService.finalizeInspection(authCtx, data),
+    // The report comes back through the API rather than as a Drive link, so
+    // that reading it is governed by requireInspectionAccess and not by the
+    // sharing setting on a folder. See PdfService.downloadPdf.
+    'downloadPdf': (authCtx, data) => PdfService.downloadPdf(authCtx, data),
     'getAuditLog': (authCtx, data) => AuditService.getEventsForInspection(authCtx, data),
   };
 

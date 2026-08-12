@@ -604,17 +604,57 @@ Generate final PDF. Idempotent — calling twice generates fresh PDF replacing o
   "data": {
     "status": "signed",
     "pdfFileId": "1xY2zW...",
-    "pdfUrl": "https://drive.google.com/file/d/1xY2zW.../view",
     "snapshotFileId": "1aB2cD..."
   }
 }
 ```
+
+`pdfFileId` identifies the file; it is not a link. The reply used to carry a
+`pdfUrl` pointing at `drive.google.com`, which only resolves for a caller whose
+Google account can read the output folder — never the tenant, and only by
+opening the folder to everyone. Fetch the report with `downloadPdf` instead.
 
 **Errors:**
 - `VALIDATION_FAILED` if not all signatures collected
 - `PDF_GENERATION_FAILED` if Doc operation failed (rare)
 
 **Performance note:** synchronous. Expected duration 20–60 sec for typical inspection. Frontend should show progress UI and have a generous fetch timeout (90 sec).
+
+---
+
+### `downloadPdf`
+The finished report's bytes, base64-encoded.
+
+**Auth:** any caller, subject to `requireInspectionAccess` — an admin, the
+inspector the inspection is assigned to, or the tenant token issued for that
+inspection. This is the point of the action: Drive can only authorize by Google
+account, which says nothing about `assignedTo` and nothing about tenant tokens,
+so serving the file here is what lets `/Inspections` stay private.
+
+**Request:**
+```json
+{ "action": "downloadPdf", "auth": { ... }, "data": { "inspectionId": "INS-2026-000123" } }
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "data": {
+    "inspectionId": "INS-2026-000123",
+    "fileName": "INS-2026-000123_final.pdf",
+    "mimeType": "application/pdf",
+    "sizeBytes": 2483102,
+    "base64Data": "JVBERi0xLjcK..."
+  }
+}
+```
+
+**Errors:**
+- `NOT_FOUND` if the inspection is not visible to this caller, has not been finalized, or its PDF is no longer in Drive
+- `PDF_TOO_LARGE` if the file exceeds `maxPdfDownloadMb` (default 20). The whole response is assembled in memory, base64 included.
+
+Each successful call appends a `pdf_downloaded` event to the audit log.
 
 ---
 
@@ -724,6 +764,7 @@ them; for a tenant token, the inspection the link was issued for.
 | `saveSignature` | ✓ | ✓ (own) | ✓ (only as `tenant`) |
 | `regenerateTenantToken` | ✓ | ✓ (own) | ✗ |
 | `finalizeInspection` | ✓ | ✓ (own) | ✗ |
+| `downloadPdf` | ✓ | ✓ (own) | ✓ (own) |
 | `getAuditLog` | ✓ | ✗ | ✗ |
 
 What stays admin-only is supervisory rather than operational: reopening a signed

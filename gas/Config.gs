@@ -169,6 +169,19 @@ const Config = (function () {
     return getNumber('imageJpegQuality', 0.75);
   }
 
+  /**
+   * The largest final PDF downloadPdf will carry back in one response.
+   *
+   * The file is read into memory, base64-encoded — a third larger again — and
+   * serialised into JSON, all inside one execution. Twenty megabytes is well
+   * clear of a typical report (a hundred-odd photos at 1600px) and well under
+   * where the platform starts failing in ways that are hard to read from the
+   * client.
+   */
+  function getMaxPdfDownloadMb() {
+    return getNumber('maxPdfDownloadMb', 20);
+  }
+
   // --- Accounts and sessions ---
 
   /**
@@ -291,6 +304,7 @@ const Config = (function () {
     getMaxAttachmentsPerInspection,
     getImageMaxDimPx,
     getImageJpegQuality,
+    getMaxPdfDownloadMb,
     getPbkdf2Iterations,
     getPasswordMinLength,
     getSessionTtlHours,

@@ -34,6 +34,7 @@ import {
 import { AUTOSAVE_DEBOUNCE_MS } from './config.js';
 import { readJson, writeJson, CACHE_KEYS } from './utils/store.js';
 import { rememberDraft, forgetDraft, readDraft, draftSectionIds } from './utils/drafts.js';
+import { base64ToBlob, saveBlob } from './utils/download.js';
 import {
   login as authLogin, setPassword as authSetPassword,
   signOut as authSignOut, suggestDeviceLabel,
@@ -2298,6 +2299,32 @@ async function offerFinalize(inspectionId) {
 // pageSuccess
 // ============================================================
 
+/**
+ * Fetch the final report through the API and hand it to the browser.
+ *
+ * Both screens that offer the report used to build
+ * `https://drive.google.com/file/d/${i.finalPdfFileId}/view` out of the
+ * inspection row and put it in an anchor. Following that link asks Drive, not
+ * this app, who may read the file — and Drive knows only the Google account in
+ * the browser, which for a tenant holding a link token is nobody. Sharing the
+ * folder widely enough for them to read it makes the file id the only thing
+ * between a stranger and a signed report.
+ *
+ * `busy` is called with true and then false around the request, so each caller
+ * redraws its own button without this needing to know how.
+ */
+async function downloadFinalPdf(inspectionId, busy) {
+  busy(true);
+  try {
+    const res = await api.downloadPdf(inspectionId);
+    saveBlob(base64ToBlob(res.base64Data, res.mimeType), res.fileName);
+  } catch (e) {
+    toastError(e.message);
+  } finally {
+    busy(false);
+  }
+}
+
 export async function pageSuccess({ params }) {
   const inspectionId = params.id;
 
@@ -2316,6 +2343,8 @@ export async function pageSuccess({ params }) {
   const isStaff = getState().authMode === 'user';
 
   let finalizing = false;
+  let downloading = false;
+  const setDownloading = (v) => { downloading = v; render(); };
 
   async function doFinalize() {
     finalizing = true; render();
@@ -2333,7 +2362,6 @@ export async function pageSuccess({ params }) {
   function render() {
     const cur = getState();
     const i = cur.inspection;
-    const pdfUrl = i.finalPdfFileId ? `https://drive.google.com/file/d/${i.finalPdfFileId}/view` : null;
 
     mount(root(),
       h('div', { class: 'app-layout' },
@@ -2350,13 +2378,12 @@ export async function pageSuccess({ params }) {
               h('p', { class: 'card__meta' }, i.inspectionId),
             ),
 
-            pdfUrl
-              ? h('a', {
+            i.finalPdfFileId
+              ? h('button', {
                   class: 'btn btn--primary btn--block mt-4',
-                  href: pdfUrl,
-                  target: '_blank',
-                  rel: 'noopener noreferrer',
-                }, 'Open final PDF')
+                  disabled: downloading || undefined,
+                  onClick: () => downloadFinalPdf(i.inspectionId, setDownloading),
+                }, downloading ? 'Preparing…' : 'Download final PDF')
               : isStaff
                 ? h('button', {
                     class: 'btn btn--primary btn--block mt-4',
@@ -2455,6 +2482,9 @@ export async function pageAdminDetail({ params }) {
     }
   }
 
+  let downloading = false;
+  const setDownloading = (v) => { downloading = v; render(); };
+
   function render() {
     const state = getState();
     const i = state.inspection;
@@ -2549,11 +2579,11 @@ export async function pageAdminDetail({ params }) {
             ),
 
             i.finalPdfFileId
-              ? h('a', {
+              ? h('button', {
                   class: 'btn btn--primary btn--block mt-3',
-                  href: `https://drive.google.com/file/d/${i.finalPdfFileId}/view`,
-                  target: '_blank', rel: 'noopener',
-                }, 'Open final PDF')
+                  disabled: downloading || undefined,
+                  onClick: () => downloadFinalPdf(inspectionId, setDownloading),
+                }, downloading ? 'Preparing…' : 'Download final PDF')
               : null,
           )
         )

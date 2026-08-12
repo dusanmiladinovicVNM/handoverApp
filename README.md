@@ -130,6 +130,14 @@ Existing inspections keep their original schema (snapshot at creation). New insp
 
 **Backups**: Drive auto-versions Sheets. Each finalized inspection also has a JSON snapshot in its output folder.
 
+**Drive sharing**: keep `/Inspections` private to the account that deployed the
+script. Nothing in the app links to Drive any more — the final report is fetched
+through the `downloadPdf` action, which applies the same access rule as every
+other inspection handler (admin, the assigned inspector, or the tenant token
+issued for that one inspection). Sharing the folder with "anyone with the link"
+would undo that: a Drive file id is not secret, and anyone holding one would
+read a signed report without signing in at all.
+
 **Quota**: free Google account has Apps Script daily limits. At ~50 inspections/month, you're nowhere near them.
 
 **Monitoring**: Apps Script Executions tab shows all incoming requests, errors, and durations.
@@ -143,6 +151,7 @@ Existing inspections keep their original schema (snapshot at creation). New insp
 - **No email notifications**: tenant link must be shared manually (copied + pasted into email/SMS).
 - **No witness / agent roles in MVP**: schema supports them but signature flow expects only `landlord` + `tenant`.
 - **No granular admin roles**: any email in `ADMIN_EMAILS` is full admin.
+- **Photo thumbnails still come straight from Drive**: `getThumbnailUrl` returns a `drive.google.com/thumbnail?id=…` URL, so photos only render if the folder is readable by the viewer's Google account. The final PDF no longer works this way; the thumbnails have the same fix waiting (serve the bytes through the API), and until then they are the one thing that argues for opening the folder up.
 
 These are deliberate scope cuts. Adding them later requires additive changes only — no schema migration.
 

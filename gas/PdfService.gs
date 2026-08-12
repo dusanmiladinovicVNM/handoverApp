@@ -1,6 +1,9 @@
 /**
  * PdfService.gs
- * Final PDF generation. Copies template Google Doc, populates content, exports as PDF.
+ * Final PDF generation, and serving the result back to a caller the app has
+ * checked — see downloadPdf, which is why no screen links to Drive.
+ *
+ * Generation copies the template Google Doc, populates content, exports as PDF.
  *
  * Strategy:
  *  1. Copy template doc into the inspection's output folder.
@@ -119,11 +122,92 @@ const PdfService = (function () {
       snapshotFileId,
     });
 
+    // No Drive URL here any more. It was the one place the backend itself
+    // published a link that only works if the output folder is shared, and a
+    // link in a reply is an invitation to render it — which is how both screens
+    // that show the report ended up doing exactly that. The report is fetched
+    // with downloadPdf; the id identifies it, and nothing more.
     return {
       status: 'signed',
       pdfFileId,
-      pdfUrl: `https://drive.google.com/file/d/${pdfFileId}/view`,
       snapshotFileId,
+    };
+  }
+
+  /**
+   * The final PDF's bytes, for a caller this app has already checked.
+   *
+   * The Drive link this replaces checked nobody. Every screen that offered the
+   * report handed out https://drive.google.com/file/d/<id>/view and left the
+   * decision to Drive — which knows nothing about `assignedTo` and nothing about
+   * tenant tokens. It knows the Google account behind the browser, and for a
+   * tenant that is someone outside the organisation entirely. So the folder had
+   * to be readable by whoever might follow a link, and from that moment the file
+   * id *was* the permission: anyone holding one read a signed report without
+   * signing in at all, and an inspector who was shown an id once kept it after
+   * the inspection was reassigned.
+   *
+   * Serving the bytes from here puts the file back behind
+   * requireInspectionAccess — an admin, the inspector it is assigned to, or the
+   * tenant token issued for that one inspection — and lets the Drive folder stay
+   * private to the account that deployed the script.
+   *
+   * Not the fastest way to move a few megabytes, and deliberately so: the cost
+   * is one execution reading a blob it already owns, against a sharing setting
+   * that cannot express the rule this app runs on.
+   */
+  function downloadPdf(authCtx, data) {
+    Utils.requireField(data, 'inspectionId', 'string');
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
+
+    const inspection = SheetService.getInspection(data.inspectionId);
+    if (!inspection) throw new HandoverError('NOT_FOUND', 'Inspection not found.');
+    if (!inspection.finalPdfFileId) {
+      throw new HandoverError('NOT_FOUND', 'This inspection has no final PDF yet.');
+    }
+
+    let blob;
+    try {
+      blob = DriveService.getFileBlob(inspection.finalPdfFileId);
+    } catch (e) {
+      // The row names a file and Drive does not have it: trashed by hand, or the
+      // id was written by a different installation. Worth a log line, because
+      // the inspection looks finalised on every screen and is not retrievable.
+      Utils.log('ERROR', 'Final PDF is on the row but not readable in Drive', {
+        inspectionId: data.inspectionId,
+        fileId: inspection.finalPdfFileId,
+        error: e.message,
+      });
+      throw new HandoverError('NOT_FOUND', 'The final PDF could not be read from Drive.');
+    }
+
+    const bytes = blob.getBytes();
+    const maxBytes = Config.getMaxPdfDownloadMb() * 1024 * 1024;
+    if (bytes.length > maxBytes) {
+      // A response carries the file base64-encoded, a third larger again, and
+      // the whole thing is built in memory here. Refusing with a number is more
+      // use than an execution that dies part-way through JSON.stringify.
+      throw new HandoverError(
+        'PDF_TOO_LARGE',
+        `This report is ${Math.ceil(bytes.length / (1024 * 1024))} MB, over the ` +
+        `${Config.getMaxPdfDownloadMb()} MB a single response can carry. ` +
+        'An administrator can raise maxPdfDownloadMb or fetch it from Drive.'
+      );
+    }
+
+    // A signed report is the document the whole app exists to produce, so who
+    // took a copy of it belongs in the same log as who generated it.
+    AuditService.log(data.inspectionId, authCtx.actorString, 'pdf_downloaded', {
+      fileId: inspection.finalPdfFileId,
+      sizeBytes: bytes.length,
+    });
+
+    return {
+      inspectionId: data.inspectionId,
+      fileName: `${data.inspectionId}_final.pdf`,
+      mimeType: 'application/pdf',
+      sizeBytes: bytes.length,
+      base64Data: Utilities.base64Encode(bytes),
     };
   }
 
@@ -390,5 +474,5 @@ const PdfService = (function () {
     return map[role] || role;
   }
 
-  return { finalizeInspection };
+  return { finalizeInspection, downloadPdf };
 })();
