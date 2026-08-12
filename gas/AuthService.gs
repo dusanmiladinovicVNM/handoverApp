@@ -243,6 +243,22 @@ const AuthService = (function () {
     // of two — see DeviceService.touch. Resolving a session reads; it does not
     // write.
 
+    return contextForUser(user, device.deviceId);
+  }
+
+  /**
+   * The context a signed-in user acts under.
+   *
+   * Named and exported because sign-in needs one too. Issuing a session already
+   * knows exactly who it is issuing to, so it can answer the first question
+   * that user is about to ask — and a second copy of these seven fields,
+   * assembled by hand over in AccountService, is the kind of thing that agrees
+   * with this one until the day a field is added to one of them.
+   *
+   * Everything here is derived from the row just read from the sheet. Nothing
+   * is taken from a token: a token says who, never what they may do.
+   */
+  function contextForUser(user, deviceId) {
     return {
       type: 'token',
       role: user.role,
@@ -250,7 +266,7 @@ const AuthService = (function () {
       userId: user.userId,
       email: user.email,
       name: user.name,
-      deviceId: device.deviceId,
+      deviceId: deviceId,
       actorString: `user:${user.email}`,
     };
   }
@@ -389,6 +405,7 @@ const AuthService = (function () {
     verifySetPasswordToken,
     verifyDeviceToken,
     resolveAuth,
+    contextForUser,
     // Permissions
     requireAdmin,
     requireStaff,

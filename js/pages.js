@@ -1007,6 +1007,42 @@ function invalidateCachedList() {
   writeJson(CACHE_KEYS.inspectionList, null);
 }
 
+/**
+ * What the New Inspection form needs, fetched before it is asked for.
+ *
+ * A request costs about three seconds here whatever it asks — /exec answers
+ * 302, the body comes from another host, and every call is its own execution
+ * with its own cold start. Measured, opening + New was 3 847 ms of which 2 489
+ * was exactly that, for two short lists that change perhaps monthly.
+ *
+ * The list screen is where someone reads before deciding, so it is a stretch of
+ * idle network. Warming it there means the form has its options by the time it
+ * is opened, and it is not wasted when they never press the button: the same
+ * two lists are what the form would have asked for on any later visit too.
+ *
+ * A promise rather than the resolved value, so a click landing mid-flight
+ * awaits the request already running instead of starting a second one.
+ */
+let newInspectionOptions = null;
+
+function prefetchNewInspectionOptions() {
+  if (newInspectionOptions) return;
+  // The rejection is swallowed here and re-observed by whoever awaits it.
+  // Without this, a failed prefetch nobody is waiting on yet is an unhandled
+  // rejection in the console — noise that looks like a bug and is not one.
+  newInspectionOptions = api.getNewInspectionOptions();
+  newInspectionOptions.catch(() => {});
+}
+
+/** The warmed options, or a fresh request when there are none to reuse. */
+function takeNewInspectionOptions() {
+  const pending = newInspectionOptions || api.getNewInspectionOptions();
+  // Dropped either way: a form opened twice should see a second answer, and a
+  // failed one must not be handed out again.
+  newInspectionOptions = null;
+  return pending;
+}
+
 export function pageAdminList() {
   const remembered = readCachedList();
   let inspections = remembered ? remembered.rows : [];
@@ -1183,6 +1219,11 @@ export function pageAdminList() {
   // honest trade: no hidden work, one obvious way to force it.
   if (isFresh) render();
   else load();
+
+  // Started after the screen is drawn, and only for the people who have a
+  // + New button to press. This is the one stretch where the network is idle
+  // and someone is reading, which is what makes it the right place to spend it.
+  if (getState().authMode === 'user') prefetchNewInspectionOptions();
 }
 
 // ============================================================
@@ -1220,7 +1261,9 @@ export function pageAdminNew() {
    */
   async function load() {
     try {
-      const res = await api.getNewInspectionOptions();
+      // Usually already in flight, or already finished, because the list screen
+      // this was opened from warmed it — see prefetchNewInspectionOptions.
+      const res = await takeNewInspectionOptions();
       schemas = res.schemas || [];
       assignableUsers = res.assignableUsers || [];
     } catch (e) {

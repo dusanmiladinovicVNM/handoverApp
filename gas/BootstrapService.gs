@@ -369,6 +369,7 @@ function verifyDeployment() {
     ['AuthService', () => AuthService, ['generateSessionToken', 'generateDeviceToken',
       'generateSetPasswordToken', 'generateTenantToken', 'verifyToken',
       'verifySetPasswordToken', 'verifyDeviceToken', 'resolveAuth',
+      'contextForUser',
       'requireAdmin', 'requireStaff', 'requireMatchingInspection',
       'requireInspectionAccess', 'visibleInspections']],
     ['AccountService', () => AccountService, ['login', 'setPassword',
