@@ -241,6 +241,19 @@ const DriveService = (function () {
     return _file(() => DriveApp.getFileById(fileId).getBlob());
   }
 
+  /**
+   * How big a file is, without reading it.
+   *
+   * downloadPdf refuses anything over a limit, and it was checking the limit
+   * after getBlob().getBytes() had already pulled the whole file into memory —
+   * so the case the limit exists for, a file large enough to kill the
+   * execution, would have killed it before the check ran. Asking Drive costs
+   * one metadata call and answers first.
+   */
+  function getFileSize(fileId) {
+    return _file(() => DriveApp.getFileById(fileId).getSize());
+  }
+
   function getThumbnailUrl(fileId) {
     return `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`;
   }
@@ -255,6 +268,7 @@ const DriveService = (function () {
     saveOutputFile,
     saveJsonFile,
     getFileBlob,
+    getFileSize,
     getThumbnailUrl,
     getStats,
   };

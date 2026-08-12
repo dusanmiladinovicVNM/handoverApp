@@ -166,6 +166,22 @@ const PdfService = (function () {
       throw new HandoverError('NOT_FOUND', 'This inspection has no final PDF yet.');
     }
 
+    // Asked before the file is read, not after.
+    //
+    // The size check used to run on bytes already in memory, which put it after
+    // the step it exists to protect: a file big enough to kill the execution
+    // kills it inside getBytes(), and the refusal never gets a chance to
+    // happen. One metadata call answers first.
+    const maxBytes = Config.getMaxPdfDownloadMb() * 1024 * 1024;
+    let declaredSize = 0;
+    try {
+      declaredSize = Number(DriveService.getFileSize(inspection.finalPdfFileId) || 0);
+    } catch (e) {
+      // Fall through: an unreadable file is reported by the read below, which
+      // says more about what went wrong than a failed size lookup would.
+    }
+    if (declaredSize > maxBytes) throw _tooLarge(declaredSize);
+
     let blob;
     try {
       blob = DriveService.getFileBlob(inspection.finalPdfFileId);
@@ -182,18 +198,9 @@ const PdfService = (function () {
     }
 
     const bytes = blob.getBytes();
-    const maxBytes = Config.getMaxPdfDownloadMb() * 1024 * 1024;
-    if (bytes.length > maxBytes) {
-      // A response carries the file base64-encoded, a third larger again, and
-      // the whole thing is built in memory here. Refusing with a number is more
-      // use than an execution that dies part-way through JSON.stringify.
-      throw new HandoverError(
-        'PDF_TOO_LARGE',
-        `This report is ${Math.ceil(bytes.length / (1024 * 1024))} MB, over the ` +
-        `${Config.getMaxPdfDownloadMb()} MB a single response can carry. ` +
-        'An administrator can raise maxPdfDownloadMb or fetch it from Drive.'
-      );
-    }
+    // Checked again on what actually arrived. Drive's number is metadata and
+    // the bytes are the thing being encoded; when they disagree the bytes win.
+    if (bytes.length > maxBytes) throw _tooLarge(bytes.length);
 
     // A signed report is the document the whole app exists to produce, so who
     // took a copy of it belongs in the same log as who generated it.
@@ -209,6 +216,20 @@ const PdfService = (function () {
       sizeBytes: bytes.length,
       base64Data: Utilities.base64Encode(bytes),
     };
+  }
+
+  /**
+   * A response carries the file base64-encoded, a third larger again, and the
+   * whole thing is built in memory here. Refusing with a number is more use
+   * than an execution that dies part-way through JSON.stringify.
+   */
+  function _tooLarge(sizeBytes) {
+    return new HandoverError(
+      'PDF_TOO_LARGE',
+      `This report is ${Math.ceil(sizeBytes / (1024 * 1024))} MB, over the ` +
+      `${Config.getMaxPdfDownloadMb()} MB a single response can carry. ` +
+      'An administrator can raise maxPdfDownloadMb or fetch it from Drive.'
+    );
   }
 
   // ============================================================
