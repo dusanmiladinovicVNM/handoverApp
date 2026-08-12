@@ -245,14 +245,29 @@ function section(title) {
   console.log(`\n${title}`);
 }
 
+/**
+ * A check whose body may be async, in which case this returns the promise and
+ * the suite has to await it. Sync suites ignore the return value and read
+ * exactly as they did before.
+ *
+ * Without this an async body's rejection lands nowhere: the check prints ok,
+ * the failure surfaces as an unhandled rejection somewhere after the summary,
+ * and the run is green. Restoring a session is entirely async, so a suite about
+ * it would otherwise be unable to fail.
+ */
 function check(name, fn) {
   state.total++;
-  try {
-    fn();
-    console.log(`  ok    ${name}`);
-  } catch (e) {
+  const pass = () => console.log(`  ok    ${name}`);
+  const fail = (e) => {
     state.failures++;
     console.log(`  FAIL  ${name}\n        ${e.message}`);
+  };
+  try {
+    const result = fn();
+    if (result && typeof result.then === 'function') return result.then(pass, fail);
+    pass();
+  } catch (e) {
+    fail(e);
   }
 }
 

@@ -27,6 +27,7 @@ const suites = [
   ['State returned by mutations', require('./mutation-state.test')],
   ['Account administration', require('./user-admin.test')],
   ['Local drafts', require('./drafts.test')],
+  ['Restoring a session', require('./session-restore.test')],
   ['Inspection lifecycle', require('./lifecycle.test')],
   ['Reading the final PDF', require('./pdf-download.test')],
   ['Markup safety', require('./markup.test')],
