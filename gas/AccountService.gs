@@ -232,12 +232,16 @@ const AccountService = (function () {
     }
     DeviceService.touch(resolved.device);
 
-    return {
+    const result = {
       sessionToken: AuthService.generateSessionToken(
         resolved.user.userId, resolved.device.deviceId, resolved.device.nonce),
       user: UserService.toPublic(resolved.user),
       expiresInHours: Config.getSessionTtlHours(),
     };
+    // Same reason as sign-in: this is the boot path for a remembered device,
+    // and the list screen is where it lands.
+    _attachFirstList(resolved.user, resolved.device, result);
+    return result;
   }
 
   /**
@@ -297,7 +301,44 @@ const AccountService = (function () {
       remembered: remember,
     });
 
+    _attachFirstList(user, device, result);
     return result;
+  }
+
+  /**
+   * The list the app is about to ask for anyway.
+   *
+   * Signing in was two requests in a row — login, then listInspections — and on
+   * this platform a request costs about three seconds before it does any work:
+   * /exec answers 302, the body comes from another host, and each call is its
+   * own execution with its own cold start. Measured, the whole sign-in step was
+   * 11.5 s of which roughly 6 s was the two round trips.
+   *
+   * Building the list here costs two sheet reads, around 750 ms, inside a
+   * request that is already happening. That is the trade: some server work to
+   * delete a round trip.
+   *
+   * Never fails the sign-in. The session has been issued and audited by the
+   * time this runs, so an error here would deny someone a session they in fact
+   * hold — and the client would sign in again, writing a second device row. The
+   * client asks for the list itself when this is absent, which is what it did
+   * before this existed.
+   */
+  function _attachFirstList(user, device, result) {
+    try {
+      const authCtx = AuthService.contextForUser(user, device.deviceId);
+      // The same page the list screen asks for, sorted the same way — anything
+      // else and the screen would flash one order and settle into another.
+      const listed = InspectionService.listInspections(authCtx, {
+        page: 0, pageSize: 100, sortBy: 'updatedAt', sortOrder: 'desc',
+      });
+      result.inspections = listed.inspections;
+      result.totalCount = listed.totalCount;
+    } catch (e) {
+      Utils.log('WARN', 'Could not attach the first list to a sign-in', {
+        userId: user.userId, error: e && e.message,
+      });
+    }
   }
 
   function _minutesUntilUnlock(user) {

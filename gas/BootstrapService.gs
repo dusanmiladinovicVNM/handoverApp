@@ -369,6 +369,7 @@ function verifyDeployment() {
     ['AuthService', () => AuthService, ['generateSessionToken', 'generateDeviceToken',
       'generateSetPasswordToken', 'generateTenantToken', 'verifyToken',
       'verifySetPasswordToken', 'verifyDeviceToken', 'resolveAuth',
+      'contextForUser',
       'requireAdmin', 'requireStaff', 'requireMatchingInspection',
       'requireInspectionAccess', 'visibleInspections']],
     ['AccountService', () => AccountService, ['login', 'setPassword',
@@ -909,4 +910,96 @@ function benchmarkPbkdf2() {
   Logger.log('  · account lockout is part of the defence, not a nicety');
   Logger.log('  · the workbook holds the hashes — do not share it more widely');
   Logger.log('    than it needs to be shared');
+}
+
+/**
+ * Why an account cannot sign in.
+ *
+ * The sign-in response says the same thing for a wrong password, an unknown
+ * address, an account with no password set, a disabled one and a locked one.
+ * That is deliberate: any difference turns the form into a way of finding out
+ * who works here. It also means that when sign-in stops working there is
+ * nothing to go on, and the person locked out is usually the one person who
+ * could have looked.
+ *
+ * This is where to look instead. It reads the account and the last few
+ * sign-in events and says which of the five it is, in plain words.
+ *
+ * Asks for no password, so it is safe to run and safe to paste the output of.
+ * Nothing here is a secret: whether an account exists and whether it is locked
+ * is hidden from the sign-in form, not from someone who already has the editor
+ * open — and anyone with the editor open could rewrite the backend anyway.
+ *
+ * Reads through UserService.getByEmail, which is the same path sign-in takes,
+ * mirror and all. If a stale mirrored row were ever the cause, it would show
+ * up here rather than be read around.
+ */
+function whyCantISignIn(email) {
+  const address = UserService.normalizeEmail(
+    email || 'promeni.me@primer.rs');
+
+  if (address === 'promeni.me@primer.rs') {
+    Logger.log('Pass the address to check: whyCantISignIn("ime@firma.rs")');
+    return;
+  }
+
+  const user = UserService.getByEmail(address);
+  if (!user) {
+    Logger.log(`No account for ${address}.`);
+    Logger.log('Either the address is misspelt, or the account was never created.');
+    Logger.log('bootstrapFirstAdmin(email, name) creates one.');
+    return;
+  }
+
+  Logger.log(`Account: ${user.name} <${user.email}>`);
+  Logger.log(`  role        ${user.role}`);
+  Logger.log(`  status      ${user.status}`);
+  Logger.log(`  password    ${PasswordService.hasPassword(user) ? 'set' : 'NOT SET'}`
+    + (user.passSetAt ? ` (${user.passSetAt})` : ''));
+  Logger.log(`  failures    ${Number(user.failedCount || 0)}`);
+  Logger.log(`  lockedUntil ${user.lockedUntil || '—'}`);
+  Logger.log(`  lastLogin   ${user.lastLoginAt || 'never'}`);
+
+  // Said outright rather than left to be worked out from the fields above.
+  const verdict = [];
+  if (user.status !== 'active') {
+    verdict.push(`Access is disabled. Re-enable it in the app, or set status to `
+      + `'active' in the Users sheet.`);
+  }
+  if (!PasswordService.hasPassword(user)) {
+    verdict.push('No password has ever been set. Run setMyPassword(), or send a '
+      + 'set-password link from the app.');
+  }
+  if (UserService.isLocked(user)) {
+    verdict.push(`Locked after too many failed attempts, until ${user.lockedUntil}. `
+      + 'setMyPassword() clears the lock as well as setting the password.');
+  }
+  if (verdict.length === 0) {
+    verdict.push('Nothing is wrong with the account itself, so sign-in is being '
+      + 'refused because the password does not match. Run setMyPassword() and use '
+      + 'exactly what you set — copy it, do not retype it.');
+  }
+  Logger.log('');
+  verdict.forEach(line => Logger.log(line));
+
+  // The last few attempts, because the reason for each is recorded even though
+  // it is never sent to the browser.
+  const recent = SheetService.getAuthAuditEvents()
+    .filter(e => String(e.actor || '').toLowerCase().indexOf(address) >= 0)
+    .slice(-8);
+
+  if (recent.length) {
+    Logger.log('');
+    Logger.log('Recent sign-in events, oldest first:');
+    recent.forEach(e => {
+      let reason = '';
+      try {
+        const details = JSON.parse(e.detailsJson || '{}');
+        reason = details.reason ? ` (${details.reason})` : '';
+      } catch (parseError) {
+        reason = ' (details unreadable)';
+      }
+      Logger.log(`  ${e.timestamp}  ${e.eventType}${reason}`);
+    });
+  }
 }

@@ -95,6 +95,21 @@ function applySession(result) {
     user: result.user,
     authError: null,
   });
+
+  // Signing in used to be two requests in a row, and the second one existed
+  // only because the first did not answer it. The server sends the first page
+  // of the list with the session now; putting it where the list screen already
+  // looks means that screen opens without a request at all.
+  //
+  // Stamped as fetched now on purpose. It was built moments ago, by the request
+  // that is still being handled — it is not a remembered list being trusted, it
+  // is this list, arriving early.
+  if (Array.isArray(result.inspections)) {
+    writeJson(CACHE_KEYS.inspectionList, {
+      rows: result.inspections,
+      fetchedAt: Date.now(),
+    });
+  }
   return result.user;
 }
 
@@ -179,6 +194,13 @@ async function _refreshFromDevice() {
     writeJson(CACHE_KEYS.user, refreshed.user);
     setAuth({ type: 'token', token: refreshed.sessionToken });
     setState({ authMode: 'user', user: refreshed.user });
+    // This reply carries the first page of the list too — see applySession.
+    if (Array.isArray(refreshed.inspections)) {
+      writeJson(CACHE_KEYS.inspectionList, {
+        rows: refreshed.inspections,
+        fetchedAt: Date.now(),
+      });
+    }
     return true;
   } catch (_) {
     // Revoked device, disabled account, or a password change elsewhere.

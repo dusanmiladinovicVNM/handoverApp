@@ -181,6 +181,14 @@ function createEnvironment(overrides, options) {
       }),
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
+    // Sign-in answers the list screen's question along with the session, so it
+    // reaches across into InspectionService. Stubbed rather than loaded: the
+    // whole inspection stack would come with it, and what these suites are
+    // about is what the sign-in reply contains, not what the list says.
+    // Replaceable through env.sandbox, which is the live context object.
+    InspectionService: options.inspectionService || {
+      listInspections: () => ({ inspections: [], totalCount: 0 }),
+    },
     MailApp: {
       sendEmail: (msg) => {
         if (mail.failNext) {
@@ -222,7 +230,7 @@ function createEnvironment(overrides, options) {
 
   // audit.events is the same array the log writes into, not a copy.
   return Object.assign({}, ctx.__exports, {
-    db, mail, config, properties, audit: { events: db.auditLog },
+    db, mail, config, properties, audit: { events: db.auditLog }, sandbox,
     // Exposed so auth-mirror.test.js can age or evict a copy the way the
     // platform would, rather than waiting six hours.
     CacheService: sandbox.CacheService,
