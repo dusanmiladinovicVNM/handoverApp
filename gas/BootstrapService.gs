@@ -1022,3 +1022,142 @@ function whyCantISignIn(email) {
     });
   }
 }
+
+/**
+ * Compare the two ways of reading the sheets an inspection needs.
+ *
+ * getInspection is the only call left that someone waits on in the app. Its
+ * server time is roughly a workbook open plus four reads, and the open is the
+ * larger half — SpreadsheetApp.openById runs afresh in every execution, and
+ * there is no cache that survives one.
+ *
+ * The Sheets advanced service does not open anything, and batchGet fetches
+ * every range in a single request. Whether that is actually faster on this
+ * deployment, with this much data, is a question about numbers, and the
+ * numbers in this project have contradicted the reasoning four times.
+ *
+ * So: run this, read the two lines, and decide. Nothing else calls Sheets yet;
+ * enabling the service costs nothing until something does.
+ *
+ * The open is sampled once and only once. Asking for the same spreadsheet
+ * twice in one execution is served from the platform's own cache, so a second
+ * sample would measure that cache and not the thing a real request pays.
+ */
+function benchmarkSheetReads() {
+  if (typeof Sheets === 'undefined') {
+    Logger.log('The Sheets advanced service is not enabled for this project.');
+    Logger.log('');
+    Logger.log('Editor → Services → + → Google Sheets API → Add.');
+    Logger.log('It is already declared in appsscript.json, so a clasp push may');
+    Logger.log('be all that is needed; the editor is the fallback.');
+    return;
+  }
+
+  const workbookId = Config.getWorkbookId();
+  // The four getInspection reads, in the order it makes them.
+  const SHEETS = ['Inspections', 'SectionAnswers', 'Attachments', 'Signatures'];
+  const ROUNDS = 5;
+
+  const ranges = SHEETS.map(function (name) {
+    const width = SheetService.COLUMNS[name].length;
+    return `${name}!A2:${_columnLetter(width)}`;
+  });
+
+  // Warm up before timing anything. Measuring a cold runtime and reporting it
+  // as the steady cost is a mistake this project has already made once, in
+  // benchmarkPbkdf2, and it was wrong by a factor of four.
+  try {
+    Sheets.Spreadsheets.Values.batchGet(workbookId, { ranges: ranges });
+  } catch (e) {
+    Logger.log(`batchGet failed: ${e.message}`);
+    Logger.log('If this says the caller does not have permission, re-authorise:');
+    Logger.log('run any function from the editor and accept the prompt.');
+    return;
+  }
+
+  Logger.log(`Reading ${SHEETS.join(', ')} — ${ROUNDS} rounds each.`);
+  Logger.log('');
+
+  // --- The current path ---
+  const openStarted = Date.now();
+  const ss = SpreadsheetApp.openById(workbookId);
+  const openMs = Date.now() - openStarted;
+
+  const currentSamples = [];
+  let rowsSeen = 0;
+  for (let i = 0; i < ROUNDS; i++) {
+    const started = Date.now();
+    let rows = 0;
+    SHEETS.forEach(function (name) {
+      const sheet = ss.getSheetByName(name);
+      const lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        rows += sheet.getRange(
+          2, 1, lastRow - 1, SheetService.COLUMNS[name].length).getValues().length;
+      }
+    });
+    currentSamples.push(Date.now() - started);
+    rowsSeen = rows;
+  }
+
+  // --- batchGet ---
+  const batchSamples = [];
+  let batchRows = 0;
+  for (let i = 0; i < ROUNDS; i++) {
+    const started = Date.now();
+    const result = Sheets.Spreadsheets.Values.batchGet(workbookId, { ranges: ranges });
+    batchSamples.push(Date.now() - started);
+    batchRows = (result.valueRanges || []).reduce(
+      function (n, r) { return n + ((r.values || []).length); }, 0);
+  }
+
+  const report = function (label, samples) {
+    const sorted = samples.slice().sort(function (a, b) { return a - b; });
+    Logger.log(`  ${label}`);
+    Logger.log(`    min ${sorted[0]}  median ${sorted[Math.floor(sorted.length / 2)]}`
+      + `  max ${sorted[sorted.length - 1]}  — ${samples.join(', ')}`);
+  };
+
+  Logger.log(`  workbook open (one sample only): ${openMs} ms`);
+  Logger.log('');
+  report('SpreadsheetApp, four reads', currentSamples);
+  report('Sheets batchGet, one request', batchSamples);
+  Logger.log('');
+
+  const median = function (a) {
+    const s = a.slice().sort(function (x, y) { return x - y; });
+    return s[Math.floor(s.length / 2)];
+  };
+  const currentTotal = openMs + median(currentSamples);
+  const batchTotal = median(batchSamples);
+
+  Logger.log(`Per request, on the medians:`);
+  Logger.log(`  now:      ${currentTotal} ms  (${openMs} open + ${median(currentSamples)} reading)`);
+  Logger.log(`  batchGet: ${batchTotal} ms`);
+  Logger.log(`  difference: ${currentTotal - batchTotal} ms`);
+  Logger.log('');
+  Logger.log(`Rows read: ${rowsSeen} the current way, ${batchRows} through batchGet.`);
+  Logger.log('They should match. If they do not, the two are not reading the same');
+  Logger.log('thing and the timings above are not comparable.');
+  Logger.log('');
+  Logger.log('Read the difference against what it would buy. Opening an inspection');
+  Logger.log('was measured at 4 337 ms end to end, of which about 2 400 is transport');
+  Logger.log('that no change here can touch. A saving under half a second is not');
+  Logger.log('worth rewriting the read path for.');
+  Logger.log('');
+  Logger.log('Note also that batchGet returns text as displayed, not the typed');
+  Logger.log('values getValues gives. Dates and numbers would arrive as strings,');
+  Logger.log('which is a second cost to weigh and not a detail.');
+}
+
+/** A1 column letter for a 1-based index. Handles the AA.. range. */
+function _columnLetter(index) {
+  let n = index;
+  let out = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
+}
