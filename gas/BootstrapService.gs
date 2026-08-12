@@ -1290,3 +1290,93 @@ function checkBatchGetFidelity() {
   Logger.log('understood — five comparisons in SheetService are against the literal');
   Logger.log("true, and a string 'TRUE' passes none of them.");
 }
+
+/**
+ * Whether the apostrophe trick actually works on this platform.
+ *
+ * SheetService puts a leading apostrophe in front of any string that starts
+ * with a character Sheets would read as a formula, because a tenant's phone
+ * number written as `+381 60 …` was being evaluated and left as #ERROR!.
+ *
+ * That fix rests on a claim about Sheets: the apostrophe marks the cell as
+ * text and is not part of the value, so it does not come back from getValues.
+ * If that is wrong, every phone number gains a stray character and the fix is
+ * worse than the bug. The unit tests cannot settle it — their fake spreadsheet
+ * strips the apostrophe because I told it to, which proves nothing about here.
+ *
+ * So this writes into a scratch sheet, reads it back both ways, and deletes it.
+ * It touches no real data.
+ */
+function checkTextEscaping() {
+  const RISKY = [
+    '+381 60 123 45 67',
+    '+41 79 000 00 00',
+    '=SUM(A1:A2)',
+    '-not a negative',
+    '@someone',
+    'Dobricka 17',
+    '',
+  ];
+
+  const ss = SpreadsheetApp.openById(Config.getWorkbookId());
+  const name = 'ScratchEscapingCheck';
+  let sheet = ss.getSheetByName(name);
+  if (sheet) ss.deleteSheet(sheet);
+  sheet = ss.insertSheet(name);
+
+  try {
+    // Written exactly the way SheetService writes a row.
+    const escaped = RISKY.map(function (v) {
+      return (typeof v === 'string' && v !== ''
+        && ['=', '+', '-', '@'].indexOf(v.charAt(0)) >= 0) ? `'${v}` : v;
+    });
+    sheet.getRange(1, 1, 1, escaped.length).setValues([escaped]);
+    SpreadsheetApp.flush();
+
+    const back = sheet.getRange(1, 1, 1, RISKY.length).getValues()[0];
+
+    let wrong = 0;
+    for (let i = 0; i < RISKY.length; i++) {
+      const same = String(back[i]) === String(RISKY[i]);
+      if (!same) wrong++;
+      Logger.log(`${same ? 'ok  ' : '✗   '} wrote ${JSON.stringify(RISKY[i])}`
+        + `  →  read ${JSON.stringify(back[i])}`);
+    }
+
+    Logger.log('');
+    if (wrong === 0) {
+      Logger.log('Every value came back as written. The apostrophe marks the cell');
+      Logger.log('as text and is not part of the value, which is what the escaping');
+      Logger.log('in SheetService depends on.');
+    } else {
+      Logger.log(`${wrong} value(s) did not survive. The escaping in SheetService`);
+      Logger.log('is not doing what it claims and phone numbers are still at risk.');
+    }
+
+    // And through the other reader, since that is where the app is heading.
+    if (typeof Sheets !== 'undefined') {
+      const range = `${name}!A1:${_columnLetter(RISKY.length)}1`;
+      const api = Sheets.Spreadsheets.Values.batchGet(Config.getWorkbookId(), {
+        ranges: [range],
+        valueRenderOption: 'UNFORMATTED_VALUE',
+        dateTimeRenderOption: 'FORMATTED_STRING',
+      });
+      const viaApi = ((api.valueRanges[0] || {}).values || [[]])[0];
+      let apiWrong = 0;
+      for (let i = 0; i < RISKY.length; i++) {
+        const got = viaApi.length > i ? viaApi[i] : '';
+        if (String(got) !== String(RISKY[i])) {
+          apiWrong++;
+          Logger.log(`✗   batchGet: wrote ${JSON.stringify(RISKY[i])}`
+            + `  →  read ${JSON.stringify(got)}`);
+        }
+      }
+      Logger.log(apiWrong === 0
+        ? 'batchGet agrees, so the escaping survives the move to the Sheets API.'
+        : `${apiWrong} value(s) differ through batchGet — the read path cannot move yet.`);
+    }
+  } finally {
+    const scratch = ss.getSheetByName(name);
+    if (scratch) ss.deleteSheet(scratch);
+  }
+}

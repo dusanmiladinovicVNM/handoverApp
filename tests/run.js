@@ -14,6 +14,7 @@ const suites = [
   ['Service worker cache', require('./shell-cache.test')],
   ['Sheet reads and cache', require('./sheet-cache.test')],
   ['Sheet timing counters', require('./sheet-stats.test')],
+  ['Cell values', require('./cell-values.test')],
   ['Section answers', require('./section-answers.test')],
   ['Config cache', require('./config-cache.test')],
   ['Schema cache', require('./schema-cache.test')],
