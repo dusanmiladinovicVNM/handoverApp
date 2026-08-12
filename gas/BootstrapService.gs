@@ -844,73 +844,92 @@ function bootstrapFirstAdmin(email, name) {
  * The right number cannot be decided in advance: each iteration crosses the
  * JavaScript/native boundary, and that cost differs enough between deployments
  * that a figure copied from documentation would be meaningless. Run this, then
- * put the recommended value into the Config sheet under pbkdf2Iterations.
+ * put the chosen value into the Config sheet under pbkdf2Iterations.
  *
  * Raising it later is safe — the iteration count is stored with every hash and
  * existing rows upgrade themselves on the owner's next sign-in.
+ *
+ * It measures twice, because there are two costs and they are far apart.
+ *
+ * The first version of this measured a cold runtime and was wrong by a factor
+ * of four the cheap way: 2.5 ms per iteration against a real warm cost nearer
+ * 0.6, so the recommendation came out four times too low, which is four times
+ * less work for anyone attacking a stolen hash. The fix was to warm up first.
+ *
+ * That fix was right and it introduced the opposite silence. A live sign-in was
+ * later measured at 20.2 s, of which 15.4 s was PBKDF2 — six times the budget
+ * this function was sizing to, because the script was cold. The warm figure is
+ * what an attacker's throughput resembles; the cold figure is what a person
+ * waits on the first sign-in of the morning, when nobody has touched the script
+ * for hours. Neither one alone is the answer, so both are printed and the trade
+ * is stated rather than decided here.
  */
 function benchmarkPbkdf2() {
   const password = 'benchmark-passphrase-of-realistic-length';
   const salt = Utils.secureRandomBytes(16);
 
   // A sign-in happens once per session — twelve hours, or sixty days on a
-  // remembered device. Several seconds of it is not a cost anyone notices, and
-  // here every millisecond spent is one the work factor gets.
+  // remembered device, where refreshSession derives nothing at all. Several
+  // seconds is not a cost anyone meets often, and every millisecond spent is
+  // one the work factor gets.
   const budgetMs = 2500;
+  const SAMPLE = 500;
 
-  // Warm up before timing anything.
-  //
-  // The first version of this function measured 2.5 ms per iteration and was
-  // wrong by a factor of four: the real cost in a warm execution is nearer
-  // 0.6 ms. Everything after that inherited the error — the recommended
-  // iteration count came out four times too low, which is four times less work
-  // for anyone attacking a stolen hash. A cold first pass measures the runtime
-  // warming up, not the work.
-  PasswordService._pbkdf2Sha256(password, salt, 500);
+  // Timed before anything else runs, so this really is the first derivation of
+  // the execution. Everything below warms the runtime and cannot be repeated.
+  const coldStarted = Date.now();
+  PasswordService._pbkdf2Sha256(password, salt, SAMPLE);
+  const coldPerIteration = (Date.now() - coldStarted) / SAMPLE;
 
   Logger.log('Measuring PBKDF2-HMAC-SHA256 …');
+  Logger.log(`  cold: ${SAMPLE} iterations → ${coldPerIteration.toFixed(4)} ms each`);
 
-  let slowestPerIteration = 0;
+  let warmPerIteration = 0;
   [200, 500, 1000].forEach(function (iterations) {
     const started = Date.now();
     PasswordService._pbkdf2Sha256(password, salt, iterations);
     const elapsed = Date.now() - started;
     const perIteration = elapsed / iterations;
-    Logger.log(`  ${iterations} iterations → ${elapsed} ms (${perIteration.toFixed(4)} ms each)`);
-    if (perIteration > slowestPerIteration) slowestPerIteration = perIteration;
+    Logger.log(`  warm: ${iterations} iterations → ${elapsed} ms (${perIteration.toFixed(4)} ms each)`);
+    if (perIteration > warmPerIteration) warmPerIteration = perIteration;
   });
 
-  const recommendation = slowestPerIteration > 0
-    ? Math.max(100, Math.floor(budgetMs / slowestPerIteration / 100) * 100)
+  const fits = (perIteration) => perIteration > 0
+    ? Math.max(100, Math.floor(budgetMs / perIteration / 100) * 100)
     : 0;
+  const warmFit = fits(warmPerIteration);
+  const coldFit = fits(coldPerIteration);
+  const current = Config.getPbkdf2Iterations();
 
   Logger.log('');
-  Logger.log(`Recommended pbkdf2Iterations: ${recommendation}`);
-  Logger.log(`Keeps a sign-in near ${(budgetMs / 1000).toFixed(1)} s, using the slowest sample.`);
-  Logger.log('Put it in the Config sheet under key: pbkdf2Iterations');
+  Logger.log(`Currently set: ${current}`);
+  Logger.log(`  warm, that is about ${Math.round(current * warmPerIteration)} ms`);
+  Logger.log(`  cold, about ${Math.round(current * coldPerIteration)} ms — `
+    + `${(coldPerIteration / Math.max(warmPerIteration, 0.0001)).toFixed(1)}x`);
   Logger.log('');
-  Logger.log('Read the number honestly. Almost all of that time is the cost of');
-  Logger.log('crossing from JavaScript into the platform, which an attacker running');
-  Logger.log('native code does not pay — so each iteration buys far less than the');
-  Logger.log('milliseconds suggest. A few thousand iterations here is nowhere near');
-  Logger.log('what bcrypt or Argon2 would give on an ordinary server.');
+  Logger.log(`Fits the ${(budgetMs / 1000).toFixed(1)} s budget:`);
+  Logger.log(`  ${warmFit} if the script is warm`);
+  Logger.log(`  ${coldFit} if it is cold`);
   Logger.log('');
-  Logger.log('But do raise the setting to what this prints. Leaving it below the');
-  Logger.log('measurement costs nothing in comfort and hands the attacker a');
-  Logger.log('proportional discount, in direct proportion:');
-  Logger.log(`  currently set: ${Config.getPbkdf2Iterations()}`);
-  Logger.log(`  fits the same budget: ${recommendation}`);
-  Logger.log('A sign-in happens once every twelve hours, or once every sixty days');
-  Logger.log('on a remembered device — so the extra second is not a cost anyone');
-  Logger.log('meets often, while the discount applies to every stolen hash.');
+  Logger.log('Pick between them knowingly; this deliberately does not pick for you.');
   Logger.log('');
-  Logger.log('What that means in practice:');
-  Logger.log('  · password LENGTH is what actually protects these accounts —');
-  Logger.log('    keep passwordMinLength at 16, so people write a phrase, not a word');
-  Logger.log('  · account lockout is part of the defence, not a nicety');
-  Logger.log('  · the workbook holds the hashes — do not share it more widely');
-  Logger.log('    than it needs to be shared');
+  Logger.log('The cold figure is what a person waits on the first sign-in of the');
+  Logger.log('morning, when nobody has touched the script for hours. The warm one is');
+  Logger.log('nearer what an attacker grinding a stolen hash would see — and they');
+  Logger.log('are running native code, so each iteration buys them far less than');
+  Logger.log('these milliseconds suggest. A few thousand iterations here is nowhere');
+  Logger.log('near what bcrypt or Argon2 would give on an ordinary server.');
+  Logger.log('');
+  Logger.log('Which is why lowering this is not free, and why it is not the first');
+  Logger.log('thing to reach for. A remembered device signs in through');
+  Logger.log('refreshSession, which verifies a token and derives nothing — so the');
+  Logger.log('cold cost is paid once every sixty days, not every morning. Account');
+  Logger.log('lockout is the other half of the defence, and it is doing more work');
+  Logger.log('here than the work factor is.');
+  Logger.log('');
+  Logger.log('Put the number you chose in the Config sheet under: pbkdf2Iterations');
 }
+
 
 /**
  * Why an account cannot sign in.
