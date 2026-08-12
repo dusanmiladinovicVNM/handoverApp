@@ -22,6 +22,7 @@ const suites = [
   ['Auth mirror', require('./auth-mirror.test')],
   ['Sign-in flows', require('./account.test')],
   ['What a sign-in returns', require('./login-payload.test')],
+  ['Who sees request timing', require('./timing-visibility.test')],
   ['Inspection visibility', require('./visibility.test')],
   ['State returned by mutations', require('./mutation-state.test')],
   ['Account administration', require('./user-admin.test')],
