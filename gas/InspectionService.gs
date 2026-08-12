@@ -97,7 +97,6 @@ const InspectionService = (function () {
 
   function getInspection(authCtx, data) {
     Utils.requireField(data, 'inspectionId', 'string');
-    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
 
     // Named together, so they arrive in one request instead of four.
     //
@@ -106,11 +105,20 @@ const InspectionService = (function () {
     // against 150 for one batchGet of the same four ranges. Asking for them one
     // at a time would keep four round trips and throw the saving away.
     //
+    // Before the access check, not after. The check reads the Inspections sheet
+    // itself, so putting it first fetched that sheet alone and left the other
+    // three to a second request — which is what a walk reporting four reads for
+    // this handler was showing. Nothing is disclosed by the order: the rows are
+    // read either way, and what the caller is allowed to see is still decided
+    // below.
+    //
     // Naming a sheet that is not needed costs a range in a request that is
     // happening anyway; forgetting one costs a whole extra request, so the list
     // errs towards complete.
     SheetService.prefetch(
       ['Inspections', 'SectionAnswers', 'Attachments', 'Signatures']);
+
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
 
     const inspection = SheetService.getInspection(data.inspectionId);
     if (!inspection) throw new HandoverError('NOT_FOUND', 'Inspection not found.');

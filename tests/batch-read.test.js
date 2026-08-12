@@ -141,6 +141,7 @@ function seed() {
       'image/jpeg', 2048, 800, 600, '', '', '', false]],
     Signatures: [['SIG-1', 'INS-1', 'tenant', 'Ana', true, 'F', '', '', '', 'n', true]],
     Users: [['U1', 'a@b.rs', 'A', 'admin', 'active', '', '', 0, '', '', '', '', '', '', '']],
+    Schemas: [['S1', 'move_in', 1, true, 'Move-in', '{"sections":[]}', '', '']],
   };
 }
 
@@ -189,6 +190,47 @@ module.exports = function run() {
     env.SheetService.listUsers();
     assert(env.calls.length === 2, `${env.calls.length} requests`);
     assert(env.calls[1].ranges.length === 1, 'the second request was not just Users');
+  });
+
+  section('Reading part of a sheet does not open the workbook either:');
+
+  check('a schema lookup opens nothing', () => {
+    // These paths were left on SpreadsheetApp when whole-sheet reads moved, and
+    // a walk that should have reported open at zero reported 210 ms. Reading
+    // narrowly is right — a Schemas row holds an entire form definition — but
+    // not at the price of an open.
+    const env = load(seed());
+    env.SheetService.getSchema('S1');
+    assert(env.opened.count === 0, `the workbook was opened ${env.opened.count} time(s)`);
+  });
+
+  check('and the summaries read for the New form open nothing', () => {
+    const env = load(seed());
+    env.SheetService.getActiveSchemaSummaries();
+    assert(env.opened.count === 0, `the workbook was opened ${env.opened.count} time(s)`);
+  });
+
+  check('a narrow lookup still finds the row it was asked for', () => {
+    const env = load(seed());
+    const schema = env.SheetService.getSchema('S1');
+    assert(schema && schema.schemaId === 'S1', `found ${schema && schema.schemaId}`);
+    assert(schema.title === 'Move-in', `title came back as ${schema.title}`);
+  });
+
+  check('and returns nothing for a key that is not there', () => {
+    const env = load(seed());
+    assert(env.SheetService.getSchema('NOPE') === null, 'a phantom schema');
+  });
+
+  check('the two ranges it reads are the key column and one row', () => {
+    // Two round trips on purpose: the second cannot be named until the first
+    // has been read. Worth checking it is two and not the whole sheet.
+    const env = load(seed());
+    env.SheetService.getSchema('S1');
+    const ranges = env.calls.map(c => c.ranges[0]);
+    assert(env.calls.length === 2, `${env.calls.length} requests for one lookup`);
+    assert(ranges[0] === 'Schemas!A2:A', `first range was ${ranges[0]}`);
+    assert(/^Schemas!A\d+:H\d+$/.test(ranges[1]), `second range was ${ranges[1]}`);
   });
 
   section('Values keep their types:');

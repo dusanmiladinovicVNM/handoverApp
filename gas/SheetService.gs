@@ -369,6 +369,45 @@ const SheetService = (function () {
     });
   }
 
+  /**
+   * One A1 range, for the paths that deliberately read less than a whole sheet.
+   *
+   * Those paths were left on SpreadsheetApp when whole-sheet reads moved, and
+   * it showed: a walk that should have reported open at zero reported 210 ms,
+   * because a schema lookup still opened the workbook to read two ranges out of
+   * it. Reading narrowly is worth it — a Schemas row carries an entire form
+   * definition — but not at the price of an open.
+   */
+  function _readRange(sheetName, startRow, startCol, numRows, numCols) {
+    // Built once from the same arguments both paths use. Handing the batch path
+    // an A1 string and the fallback a set of offsets would let the two describe
+    // different ranges, and the fallback is the one nobody runs — so it would
+    // be wrong for a long time before anyone noticed.
+    const firstCol = columnLetter(startCol);
+    const lastCol = columnLetter(startCol + numCols - 1);
+    const endRow = numRows ? String(startRow + numRows - 1) : '';
+    const a1 = `${sheetName}!${firstCol}${startRow}:${lastCol}${endRow}`;
+
+    if (!_canBatch()) {
+      return _rawRead(function () {
+        const sheet = _sheet(sheetName);
+        const lastRow = sheet.getLastRow();
+        const rows = numRows || (lastRow - startRow + 1);
+        if (rows <= 0) return [];
+        return sheet.getRange(startRow, startCol, rows, numCols).getValues();
+      });
+    }
+    return _rawRead(function () {
+      const answer = Sheets.Spreadsheets.Values.batchGet(Config.getWorkbookId(), {
+        ranges: [a1],
+        valueRenderOption: 'UNFORMATTED_VALUE',
+        dateTimeRenderOption: 'FORMATTED_STRING',
+      });
+      const values = ((answer.valueRanges || [])[0] || {}).values || [];
+      return _padRows(values, numCols);
+    });
+  }
+
   function _getAllRows(sheetName) {
     if (_rowCache[sheetName]) return _rowCache[sheetName];
     _fetchRows([sheetName]);
@@ -433,23 +472,26 @@ const SheetService = (function () {
     return null;
   }
 
+  /**
+   * The key column, then the one row that matched.
+   *
+   * Two round trips instead of one, moving a fraction of the bytes: a Schemas
+   * row holds a whole form definition, and reading every row to find one pulls
+   * every form in the workbook. The second range cannot be named until the
+   * first has been read, so this is genuinely sequential and not a batch that
+   * was missed.
+   */
   function _findRowNarrow(sheetName, colIndex, needle) {
-    return _rawRead(function () {
-      const sheet = _sheet(sheetName);
-      const lastRow = sheet.getLastRow();
-      if (lastRow <= 1) return null;
+    const width = COLUMNS[sheetName].length;
+    const keys = _readRange(sheetName, 2, colIndex + 1, null, 1);
 
-      const keys = sheet.getRange(2, colIndex + 1, lastRow - 1, 1).getValues();
-      for (let i = 0; i < keys.length; i++) {
-        if (String(keys[i][0]) !== needle) continue;
-        const rowIndex = i + 2;
-        const row = sheet.getRange(rowIndex, 1, 1, COLUMNS[sheetName].length).getValues()[0];
-        // The key column and the row are two round trips; _rawRead counts one.
-        _stats.reads += 1;
-        return { rowIndex: rowIndex, data: _rowToObject(sheetName, row) };
-      }
-      return null;
-    });
+    for (let i = 0; i < keys.length; i++) {
+      if (String(keys[i][0]) !== needle) continue;
+      const rowIndex = i + 2;
+      const rows = _readRange(sheetName, rowIndex, 1, 1, width);
+      return { rowIndex: rowIndex, data: _rowToObject(sheetName, rows[0] || []) };
+    }
+    return null;
   }
 
   function _appendRow(sheetName, obj) {
@@ -787,11 +829,8 @@ const SheetService = (function () {
     const wanted = ['schemaId', 'inspectionType', 'version', 'active', 'title'];
     const last = Math.max.apply(null, wanted.map(c => cols.indexOf(c))) + 1;
 
-    const sheet = _sheet('Schemas');
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) return [];
-
-    const rows = _rawRead(() => sheet.getRange(2, 1, lastRow - 1, last).getValues());
+    // Was the other path still opening the workbook to read part of a sheet.
+    const rows = _readRange('Schemas', 2, 1, null, last);
     return rows
       .map(r => {
         const o = {};
