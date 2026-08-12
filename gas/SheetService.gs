@@ -102,7 +102,7 @@ const SheetService = (function () {
    * while the person sits looking at a spinner.
    */
   const _stats = {
-    opened: false, openMs: 0,
+    openMs: 0,
     reads: 0, readMs: 0,
     writes: 0, writeMs: 0,
     locks: 0, lockWaitMs: 0,
@@ -112,10 +112,38 @@ const SheetService = (function () {
     if (!_ssCache) {
       const startedAt = Date.now();
       _ssCache = SpreadsheetApp.openById(Config.getWorkbookId());
-      _stats.opened = true;
-      _stats.openMs = Date.now() - startedAt;
+      _stats.openMs += Date.now() - startedAt;
     }
     return _ssCache;
+  }
+
+  /**
+   * Time a sheet operation without charging it for the workbook open.
+   *
+   * Opening the workbook is the single most expensive thing in a request and
+   * happens inside whichever operation gets there first, so leaving it in that
+   * operation's figure makes one arbitrary read look enormous. It is measured
+   * separately, and taken out of the operation that triggered it.
+   *
+   * Measured as a difference, not signalled by a flag. A flag was tried and
+   * went wrong in a way that showed up as an impossible number: the narrow-read
+   * path counted its own time without clearing the flag, so the open was added
+   * once inside that read and then subtracted again from an entirely different
+   * read later — which reported reads(2) at minus 445 ms. Two errors that very
+   * nearly cancelled in the total, so only the negative gave it away.
+   *
+   * A difference cannot drift like that. Whatever the open cost during this
+   * call is exactly what comes off this call, and nothing reaches any other.
+   */
+  function _timed(counterName, msName, fn) {
+    const startedAt = Date.now();
+    const openedBefore = _stats.openMs;
+    try {
+      return fn();
+    } finally {
+      _stats[counterName] += 1;
+      _stats[msName] += Date.now() - startedAt - (_stats.openMs - openedBefore);
+    }
   }
 
   function getStats() {
@@ -138,13 +166,7 @@ const SheetService = (function () {
    * batching that loop — because they were never showing the cost.
    */
   function _rawRead(fn) {
-    const startedAt = Date.now();
-    try {
-      return fn();
-    } finally {
-      _stats.reads += 1;
-      _stats.readMs += Date.now() - startedAt;
-    }
+    return _timed('reads', 'readMs', fn);
   }
 
   /**
@@ -170,13 +192,8 @@ const SheetService = (function () {
 
   /** Wrap a write so it shows up in the slow-request breakdown. */
   function _write(fn) {
-    const startedAt = Date.now();
-    try {
-      return fn();
-    } finally {
-      _stats.writes += 1;
-      _stats.writeMs += Date.now() - startedAt;
-    }
+    // A write opens the workbook too, when it is the first thing to touch it.
+    return _timed('writes', 'writeMs', fn);
   }
 
   function _sheet(name) {
@@ -229,26 +246,16 @@ const SheetService = (function () {
   function _getAllRows(sheetName) {
     if (_rowCache[sheetName]) return _rowCache[sheetName];
 
-    const startedAt = Date.now();
-    const sheet = _sheet(sheetName);
-    const lastRow = sheet.getLastRow();
-    const rows = lastRow <= 1
-      ? []
-      : sheet.getRange(2, 1, lastRow - 1, COLUMNS[sheetName].length).getValues();
-    _countRead(startedAt);
+    const rows = _rawRead(function () {
+      const sheet = _sheet(sheetName);
+      const lastRow = sheet.getLastRow();
+      return lastRow <= 1
+        ? []
+        : sheet.getRange(2, 1, lastRow - 1, COLUMNS[sheetName].length).getValues();
+    });
 
     _rowCache[sheetName] = rows;
     return rows;
-  }
-
-  /**
-   * Time inside _ss() is the workbook open, counted separately; charging it to
-   * the read that happened to trigger it would hide it.
-   */
-  function _countRead(startedAt) {
-    _stats.reads += 1;
-    _stats.readMs += Date.now() - startedAt - (_stats.opened ? _stats.openMs : 0);
-    _stats.opened = false;
   }
 
   /**
@@ -294,25 +301,22 @@ const SheetService = (function () {
   }
 
   function _findRowNarrow(sheetName, colIndex, needle) {
-    const startedAt = Date.now();
-    const sheet = _sheet(sheetName);
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-      _countRead(startedAt);
-      return null;
-    }
+    return _rawRead(function () {
+      const sheet = _sheet(sheetName);
+      const lastRow = sheet.getLastRow();
+      if (lastRow <= 1) return null;
 
-    const keys = sheet.getRange(2, colIndex + 1, lastRow - 1, 1).getValues();
-    for (let i = 0; i < keys.length; i++) {
-      if (String(keys[i][0]) !== needle) continue;
-      const rowIndex = i + 2;
-      const row = sheet.getRange(rowIndex, 1, 1, COLUMNS[sheetName].length).getValues()[0];
-      _countRead(startedAt);
-      _stats.reads += 1; // the key column and the row are two round trips
-      return { rowIndex: rowIndex, data: _rowToObject(sheetName, row) };
-    }
-    _countRead(startedAt);
-    return null;
+      const keys = sheet.getRange(2, colIndex + 1, lastRow - 1, 1).getValues();
+      for (let i = 0; i < keys.length; i++) {
+        if (String(keys[i][0]) !== needle) continue;
+        const rowIndex = i + 2;
+        const row = sheet.getRange(rowIndex, 1, 1, COLUMNS[sheetName].length).getValues()[0];
+        // The key column and the row are two round trips; _rawRead counts one.
+        _stats.reads += 1;
+        return { rowIndex: rowIndex, data: _rowToObject(sheetName, row) };
+      }
+      return null;
+    });
   }
 
   function _appendRow(sheetName, obj) {
