@@ -58,7 +58,7 @@ function doPost(e) {
     const workMs = Date.now() - startedAt;
     const timing = Object.assign({
       action: action,
-      actor: authCtx ? authCtx.actorString : 'anonymous',
+      actor: _actorFor(authCtx, isPublic, result),
       authMs: authMs,
       handlerMs: workMs - authMs,
       totalMs: workMs,
@@ -76,11 +76,56 @@ function doPost(e) {
     // The caller gets the same breakdown it would otherwise have to ask the
     // sheet for, and only an admin: it names internal costs.
     return ResponseService.success(
-      (authCtx && authCtx.isAdmin) ? Object.assign({ timing: timing }, result) : result);
+      _maySeeTiming(authCtx, isPublic, result)
+        ? Object.assign({ timing: timing }, result)
+        : result);
 
   } catch (e) {
     return ResponseService.fromException(e);
   }
+}
+
+/**
+ * Whether this caller may see how long the request took inside.
+ *
+ * Admins only, because the breakdown names internal costs — which sheets were
+ * read, how many writes, how long the password hash took.
+ *
+ * The sign-in actions had no way to qualify. They are dispatched with no
+ * context at all, by design, so the check found nothing to look at and every
+ * sign-in came back without timing. That left the slowest request in the app —
+ * measured near ten seconds, half of the whole walk — as the one request whose
+ * inside could not be seen. Guessing at it is how three earlier assumptions
+ * about this backend turned out wrong.
+ *
+ * A successful sign-in has just proved who the caller is: the password was
+ * verified against the row that was read, and the role in the reply came from
+ * that same row. So identity is taken from the result, there being no context
+ * yet to take it from.
+ *
+ * Deliberately narrowed to the public actions. Everywhere else there is a real
+ * context and it is the thing to ask — a handler that happens to return some
+ * *other* user must never be able to widen what its caller is shown.
+ */
+function _maySeeTiming(authCtx, isPublic, result) {
+  if (authCtx) return authCtx.isAdmin === true;
+  if (!isPublic) return false;
+  return !!(result && result.user && result.user.role === 'admin');
+}
+
+/**
+ * Who the timing log should name.
+ *
+ * 'anonymous' was right for a failed sign-in and misleading for a successful
+ * one: the log's own record of the slowest request in the app named nobody,
+ * which makes it useless for asking whether one account is slower than another.
+ */
+function _actorFor(authCtx, isPublic, result) {
+  if (authCtx) return authCtx.actorString;
+  if (isPublic && result && result.user && result.user.email) {
+    return `user:${result.user.email}`;
+  }
+  return 'anonymous';
 }
 
 /**

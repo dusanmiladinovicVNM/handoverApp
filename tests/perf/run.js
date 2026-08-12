@@ -98,6 +98,7 @@ async function main() {
   // One array either way, so step() counts the same thing in both modes.
   const calls = [];
   const serverTimings = [];
+  const pendingBodies = [];
 
   if (LIVE) {
     // Watch the wire without answering for it, and pick up the timing block
@@ -110,13 +111,24 @@ async function main() {
     // body from script.googleusercontent.com. Filtering responses on the
     // request URL therefore matched only the redirect, which has no body —
     // which is why the first live run reported no server timings at all.
-    page.on('response', async (r) => {
+    // Reading a body is asynchronous, and the walk navigates away from pages
+    // while their last response is still being read — which throws, is
+    // swallowed, and silently drops that action from the report. saveSection
+    // went missing exactly this way: present in one run, absent in the next,
+    // depending on whether the following step's goto won the race. A table that
+    // quietly omits a row is worse than one that is slow to print.
+    //
+    // So every read is kept, and awaited before the browser is closed.
+    page.on('response', (r) => {
       const url = r.url();
       if (!url.includes('/macros/s/') && !url.includes('googleusercontent.com')) return;
-      try {
-        const body = await r.json();
-        if (body && body.data && body.data.timing) serverTimings.push(body.data.timing);
-      } catch (_) {}
+      pendingBodies.push(
+        r.json()
+          .then((body) => {
+            if (body && body.data && body.data.timing) serverTimings.push(body.data.timing);
+          })
+          .catch(() => {})
+      );
     });
   } else {
     await install(page, LATENCY, calls);
@@ -188,8 +200,12 @@ async function main() {
     // Waits for the save to land rather than sleeping past the debounce. A
     // fixed sleep buried the thing being measured: 2.2 s of waiting reported
     // as 2.2 s of saving, whatever the save actually cost.
+    //
+    // The body host only. /exec answers 302 first, and matching that as well
+    // stopped the clock on the redirect — half the round trip, reported as the
+    // whole save.
     const saved = page.waitForResponse(
-      (r) => (r.url().includes('/macros/s/') || r.url().includes('googleusercontent.com')),
+      (r) => r.url().includes('googleusercontent.com'),
       { timeout: 60000 }).catch(() => null);
     await box.fill('Scuff on the left wall');
     await saved;
@@ -205,6 +221,8 @@ async function main() {
     await page.waitForSelector('select.form-select', { timeout: 60000 });
   });
 
+  // Before the browser goes, or the last action's numbers go with it.
+  await Promise.allSettled(pendingBodies);
   await browser.close();
   server.close();
 
