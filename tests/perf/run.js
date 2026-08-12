@@ -107,6 +107,31 @@ function tagged(kind, message) {
   return e;
 }
 
+/**
+ * Move between measured steps, saying which screen was expected.
+ *
+ * The steps are a sequence, and each assumes the one before left the walk
+ * somewhere particular. When that assumption is wrong the failure is thirty
+ * seconds of Playwright waiting for a selector, and a message naming the
+ * selector but not the screen — which says nothing about being on the wrong
+ * one. That is what a missing "back to the list" click cost: half a minute to
+ * be told `.section-list__item` never appeared, on a screen that shows question
+ * cards.
+ *
+ * Short timeout on purpose. This is navigation the walk has already measured
+ * elsewhere, so it should be immediate, and waiting a minute to learn the walk
+ * is lost helps nobody.
+ */
+async function reach(page, description, act, selector) {
+  await act();
+  try {
+    await page.waitForSelector(selector, { timeout: 15000 });
+  } catch (e) {
+    throw tagged('lost',
+      `the walk expected to reach ${description} (${selector}) and did not`);
+  }
+}
+
 /** One measured step. */
 async function step(ctx, name, fn) {
   const before = ctx.calls.length;
@@ -229,8 +254,8 @@ async function main() {
 
   // Opened outside the measured step, so what is timed is the save and not
   // the navigation before it.
-  await page.click('.section-list__item');
-  await page.waitForSelector('.cards-wrapper .question__input-slot', { timeout: 60000 });
+  await reach(page, 'a section',
+    () => page.click('.section-list__item'), '.cards-wrapper .question__input-slot');
 
   await step(ctx, 'autosave a typed answer', async () => {
     const box = page.locator('textarea, input[type=text]').first();
@@ -260,8 +285,14 @@ async function main() {
   //
   // Expect one request and almost no wall time. Should they ever converge
   // again, leaving has gone back to blocking on the network.
-  await page.click('.section-list__item');
-  await page.waitForSelector('.cards-wrapper .question__input-slot', { timeout: 60000 });
+  //
+  // The save step above leaves the walk inside the section, so getting back to
+  // the list comes first. Omitting it looked harmless and cost thirty seconds
+  // waiting for a section row on a screen that shows question cards.
+  await reach(page, 'the section list',
+    () => page.click('.bottom-bar button'), '.section-list__item');
+  await reach(page, 'a section',
+    () => page.click('.section-list__item'), '.cards-wrapper .question__input-slot');
 
   await step(ctx, 'type, then leave the section', async () => {
     const box = page.locator('textarea, input[type=text]').first();
@@ -377,6 +408,14 @@ function explain(error) {
       '',
       'Create one with + New and leave it empty — it sorts to the top and the',
       'walk fills in a single answer, which is what it is there to measure.',
+    ];
+  }
+
+  if (kind === 'lost') {
+    return [
+      'A step assumed the screen the one before it left behind, and that is not',
+      'where the walk is. Nothing is wrong with the app — the sequence in',
+      'tests/perf/run.js is.',
     ];
   }
 
