@@ -31,8 +31,17 @@ const ValidationService = (function () {
       case 'notEquals': return fieldValue !== target;
       case 'in': return Array.isArray(target) && target.indexOf(fieldValue) >= 0;
       case 'notIn': return Array.isArray(target) && target.indexOf(fieldValue) < 0;
-      case 'truthy': return !!fieldValue && fieldValue !== '' && fieldValue !== '0';
-      case 'falsy': return !fieldValue || fieldValue === '' || fieldValue === '0';
+      // 'false' is in these lists because a sheet cell cannot hold a boolean.
+      // An unchecked box is stored as the word, and `!!'false'` is true — so
+      // every item hanging off an unchecked checkbox was visible and required
+      // here while the screen correctly hid it. Locking then failed on items
+      // the inspector could not see, naming a count and not a cause.
+      case 'truthy':
+        return !!fieldValue && fieldValue !== '' && fieldValue !== '0'
+          && fieldValue !== 'false';
+      case 'falsy':
+        return !fieldValue || fieldValue === '' || fieldValue === '0'
+          || fieldValue === 'false';
       default: return true;
     }
   }
@@ -64,9 +73,41 @@ const ValidationService = (function () {
   function _isAnswered(value, valueType) {
     if (value === undefined || value === null) return false;
     if (valueType === 'checkbox') return value === true || value === 'true' || value === 'TRUE';
+    // A multi-select is stored as JSON, so choosing nothing arrives here as the
+    // two characters '[]' — which is a non-empty string, and satisfied a
+    // required item without a single option picked.
+    if (valueType === 'multiselect') return _chosenCount(value) > 0;
+    if (Array.isArray(value)) return value.length > 0;
     if (typeof value === 'string') return value.trim().length > 0;
     if (typeof value === 'number') return !isNaN(value);
     return true;
+  }
+
+  /**
+   * How many options a multi-select answer holds, whichever shape it is in.
+   *
+   * The array when it has not been through a sheet yet, and the JSON text once
+   * it has.
+   *
+   * Text that is not JSON at all counts as one choice rather than none. That is
+   * deliberate, and it is for data this app did not write: a multi-select
+   * imported or edited by hand in the sheet reads as a bare word, and refusing
+   * it would leave an inspection that looks complete on screen impossible to
+   * lock, with nothing the inspector could do about it. Only text that opens a
+   * bracket is held to being valid JSON, because only that was meant as a list.
+   */
+  function _chosenCount(value) {
+    if (Array.isArray(value)) return value.length;
+    const text = String(value).trim();
+    if (!text) return 0;
+    if (text.charAt(0) !== '[') return 1;
+    try {
+      const parsed = JSON.parse(text);
+      return Array.isArray(parsed) ? parsed.length : 1;
+    } catch (e) {
+      // Meant as a list and damaged. Nothing can be read out of it.
+      return 0;
+    }
   }
 
   /**

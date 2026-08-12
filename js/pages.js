@@ -1905,13 +1905,33 @@ export async function pageReview({ params }) {
     }
   }
 
-  const state = getState();
-  const insp = state.inspection;
-  const schema = state.schema;
-  const progress = inspectionProgress(schema, state.answers);
-  const missing = findAllMissingRequired(schema, state.answers);
+  const schema = getState().schema;
 
   let locking = false;
+
+  /**
+   * What the server said was missing, when it disagreed with us.
+   *
+   * The list on this screen is computed by validator.js, a mirror of
+   * ValidationService that can drift from it — and did: the screen said every
+   * required item was complete while the lock came back refusing one. Once the
+   * two disagree the server is the answer, because the server is the one
+   * deciding, so its list replaces ours until something is edited.
+   *
+   * It also carries which item, which the screen used to receive and discard in
+   * favour of printing a count. A refusal that knows the answer and will not
+   * say it is worse than no refusal at all — there is nothing to act on, and
+   * the screen goes on insisting nothing is wrong.
+   */
+  let serverMissing = null;
+
+  /** The server names the item; the section's title has to come from the schema. */
+  function withSectionTitles(items) {
+    return items.map(m => {
+      const section = (schema.sections || []).find(s => s.id === m.sectionId);
+      return Object.assign({ sectionTitle: (section && section.title) || m.sectionId }, m);
+    });
+  }
 
   async function doLock() {
     const ok = await confirm({
@@ -1923,15 +1943,21 @@ export async function pageReview({ params }) {
     locking = true; render();
     try {
       await applyMutationState(await api.lockInspection(inspectionId), inspectionId);
+      serverMissing = null;
       toastSuccess('Inspection locked. Ready for signatures.');
       navigate(`/inspection/${inspectionId}/sign`);
     } catch (e) {
       if (e.code === 'VALIDATION_FAILED' && e.details && e.details.missingItems) {
-        toastError(`${e.details.missingItems.length} required items missing.`);
+        serverMissing = withSectionTitles(e.details.missingItems);
+        // Named, not counted. "1 required items missing" on a screen that says
+        // everything is complete leaves someone with nowhere to go.
+        const first = serverMissing[0];
+        toastError(serverMissing.length === 1
+          ? `Still missing: ${first.sectionTitle} — ${first.label}`
+          : `${serverMissing.length} required items missing, listed above.`);
         // The lock was refused, so nothing came back to redraw from — this one
         // really does have to ask.
-        const data = await api.getInspection(inspectionId);
-        setInspectionData(data);
+        setInspectionData(await api.getInspection(inspectionId));
       } else {
         toastError(e.message);
       }
@@ -1942,6 +1968,14 @@ export async function pageReview({ params }) {
   }
 
   function render() {
+    // Read at render time, not captured when the page opened. A refused lock
+    // re-fetches the inspection and calls render again, and the snapshot this
+    // used to close over meant the redraw showed the state from before the
+    // refusal — the banner kept saying every required item was complete.
+    const state = getState();
+    const insp = state.inspection;
+    const missing = serverMissing || findAllMissingRequired(schema, state.answers);
+
     mount(root(),
       h('div', { class: 'app-layout' },
         appHeader({ title: 'Review', onBack: () => navigate('/inspection/' + inspectionId) }),
