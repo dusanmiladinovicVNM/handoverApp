@@ -147,7 +147,12 @@ async function main() {
       { timeout: 60000 });
     const refusal = page.locator('.banner--danger');
     if (await refusal.count()) {
-      throw new Error('sign-in was refused: ' + (await refusal.first().innerText()).trim());
+      // "Refused" only when the server actually judged the credentials. The
+      // same banner also carries transport failures — a 404 from a deployment
+      // that has moved, a timeout, an HTML error page — and calling those a
+      // refusal is what sent someone to reset a password over a broken URL.
+      const text = (await refusal.first().innerText()).trim();
+      throw new Error(`sign-in did not complete: ${text}`);
     }
   });
 
@@ -243,16 +248,60 @@ function report(results, serverTimings) {
   console.log('');
 }
 
+/**
+ * Say what actually went wrong, which is not always what it looks like.
+ *
+ * This used to print the password advice for every failed sign-in, and one run
+ * failed with HTTP 404 — a deployment that was not answering, where the server
+ * never saw a password at all. The advice sent someone to reset a working
+ * password over a broken URL. The failures below are told apart because
+ * confidently wrong guidance costs more than none.
+ */
+function explain(message) {
+  if (/HTTP \d+/.test(message)) {
+    return [
+      'That is the backend not answering, not a password problem — the server',
+      'never saw the credentials.',
+      '',
+      'Open BACKEND_URL from js/config.js in a browser. If it 404s there too,',
+      'check Deploy → Manage deployments in the Apps Script editor: that the web',
+      'app deployment still exists, and that its URL is the one in config.js. A',
+      'fresh clasp push can also 404 for a minute while it is applied.',
+    ];
+  }
+  if (/timed out|NETWORK_ERROR|Network request failed/.test(message)) {
+    return [
+      'The request never came back. Sign-in is the slowest call — PBKDF2 plus',
+      'two sheet writes — so on a cold script it can outrun the client timeout',
+      'in js/config.js. Try once more before treating it as broken.',
+    ];
+  }
+  if (/non-JSON|INVALID_RESPONSE/.test(message)) {
+    return [
+      'Apps Script returned an HTML error page instead of JSON, which usually',
+      'means the server threw before reaching the handler. Check the executions',
+      'log in the Apps Script editor for the stack.',
+    ];
+  }
+  if (/Incorrect email address or password|no longer valid|disabled|Too many/.test(message)) {
+    return [
+      'The server answers the same way for a wrong password, an unknown address,',
+      'a disabled account and a locked one — on purpose, so the form cannot be',
+      'used to find out who works here.',
+      '',
+      'whyCantISignIn("you@firma.rs") in the Apps Script editor says which of',
+      'them it is. It asks for no password.',
+    ];
+  }
+  if (/Cannot find module/.test(message)) {
+    return ['Install the browser:  npx playwright install chromium'];
+  }
+  return [];
+}
+
 main().catch((e) => {
   console.error('\nperf walk failed:', e.message);
-  if (/sign-in was refused/.test(e.message)) {
-    console.error('\nThe server answers the same way for a wrong password, an unknown');
-    console.error('address, a disabled account and a locked one — on purpose, so the form');
-    console.error('cannot be used to find out who works here. To rule out a lockout from');
-    console.error('earlier attempts, run setMyPassword() in the Apps Script editor: it');
-    console.error('clears failedCount and lockedUntil as well as setting the password.');
-  } else if (/Cannot find module/.test(e.message)) {
-    console.error('\nInstall the browser:  npx playwright install chromium');
-  }
+  const lines = explain(e.message);
+  if (lines.length) console.error('\n' + lines.join('\n'));
   process.exit(1);
 });
