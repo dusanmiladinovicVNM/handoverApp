@@ -48,6 +48,15 @@ if ('serviceWorker' in navigator) {
 // ============================================================
 
 async function boot() {
+  // Ask for the storage to be treated as durable. The sign-in credential lives
+  // in localStorage, and a browser under pressure — an iPhone especially — may
+  // evict script-writable storage from a site it considers disposable, which
+  // from the user's side is the app forgetting them for no reason. Refused or
+  // absent, it costs nothing.
+  if (navigator.storage && navigator.storage.persist) {
+    try { navigator.storage.persist().catch(() => {}); } catch (_) {}
+  }
+
   const route = Router.getCurrentRoute();
   const tenantToken = route.query.t;
 

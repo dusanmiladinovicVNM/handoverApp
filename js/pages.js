@@ -38,7 +38,7 @@ import { track as trackSave, settled as savesSettled } from './utils/pending-sav
 import { base64ToBlob, saveBlob } from './utils/download.js';
 import {
   login as authLogin, setPassword as authSetPassword,
-  signOut as authSignOut, suggestDeviceLabel,
+  signOut as authSignOut, suggestDeviceLabel, readLastRestore, storageUsable,
 } from './auth.js';
 
 const root = () => document.getElementById('app-root');
@@ -123,7 +123,57 @@ function formField(label, attrs, hint) {
   );
 }
 
+/**
+ * One line saying why this screen is being shown, from what the last boot
+ * recorded. Absent when the app has nothing to explain.
+ *
+ * It exists because the place this goes wrong is a phone, and a phone has no
+ * console: an iPhone that signed in four times in eighty seconds looks the same
+ * from the outside whether the saved sign-in was thrown away by the app,
+ * refused by the server, or never written to storage in the first place — and
+ * those are three different faults.
+ */
+function lastRestoreNote() {
+  // Asked first, and not from the record: a device that cannot store anything
+  // cannot store the note saying so either, so this is the one case history
+  // could never report on itself.
+  if (!storageUsable()) {
+    return h('p', { class: 'text-xs text-muted mt-3' },
+      'This device is not saving data, so it cannot stay signed in. ' +
+      'Private browsing or full storage will do that.');
+  }
+
+  const last = readLastRestore();
+  if (!last) return null;
+
+  const text =
+    last.outcome === 'empty'
+      ? (last.detail === 'device_token_did_not_persist'
+          ? 'This device could not save your sign-in — storage is unavailable or full.'
+          : 'No saved sign-in was found on this device.')
+    : last.outcome === 'refused'
+      ? 'The saved sign-in was refused. It may have been revoked, or a password was changed.'
+    : last.outcome === 'unreachable'
+      ? 'The server could not be reached. Your saved sign-in is still on this device.'
+    : last.outcome === 'signed_in' && last.detail === 'device_token_did_not_persist'
+      ? 'This device could not save your sign-in — storage is unavailable or full.'
+    : last.outcome === 'signed_in' && !last.hadDevice
+      ? 'The last sign-in was not remembered on this device.'
+      : null;
+
+  if (!text) return null;
+  return h('p', { class: 'text-xs text-muted mt-3' }, text);
+}
+
 export function pageLogin() {
+  // Already signed in. An iPhone home-screen icon opens the URL it was created
+  // from, so one added while this screen was showing comes back here every
+  // launch — and the form would ask for a password the app does not need.
+  if (getState().authMode === 'user') {
+    navigate('/admin', true);
+    return;
+  }
+
   let email = '';
   let password = '';
   let remember = true;
@@ -210,6 +260,7 @@ export function pageLogin() {
         h('hr', { style: { border: 'none', borderTop: '1px solid var(--color-border)', margin: '1.5rem 0' }}),
         h('p', { class: 'text-xs text-muted' },
           'Tenants do not sign in — they receive a direct link for their inspection.'),
+        lastRestoreNote(),
       )
     ));
   }
