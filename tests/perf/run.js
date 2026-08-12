@@ -249,6 +249,29 @@ async function main() {
     await saved;
   });
 
+  // The step above measures the save. This one measures the person, which is
+  // not the same thing and was the more important of the two to get wrong.
+  //
+  // Every way out of a section used to await its save, so leaving cost the
+  // whole round trip — five seconds, fifteen times over an inspection, which
+  // was most of the time spent filling one in. The walk never showed it: it
+  // typed, waited for the response, and only then navigated, so the wait it was
+  // measuring had already been paid.
+  //
+  // Expect one request and almost no wall time. Should they ever converge
+  // again, leaving has gone back to blocking on the network.
+  await page.click('.section-list__item');
+  await page.waitForSelector('.cards-wrapper .question__input-slot', { timeout: 60000 });
+
+  await step(ctx, 'type, then leave the section', async () => {
+    const box = page.locator('textarea, input[type=text]').first();
+    if (!(await box.count())) return;
+    await box.fill('Left before the save landed');
+    // 'Sections' — the first button in the bottom bar, as used above.
+    await page.click('.bottom-bar button');
+    await page.waitForSelector('.section-list__item', { timeout: 60000 });
+  });
+
   await step(ctx, 'back to the inspection list', async () => {
     await page.goto(base + '#/admin', { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.list-item, .empty-state__title', { timeout: 60000 });
