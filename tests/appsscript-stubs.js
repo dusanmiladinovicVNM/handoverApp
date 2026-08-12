@@ -245,15 +245,37 @@ function section(title) {
   console.log(`\n${title}`);
 }
 
+/**
+ * One check. Synchronous by default; returns a promise when the body is async.
+ *
+ * The async half exists because it was missing, and missing silently. A check
+ * whose body returned a promise had its rejection land nowhere: try/catch saw
+ * the promise being created, not the assertion failing inside it, so the check
+ * printed ok whatever it found. A test that cannot fail is worse than no test,
+ * because it is counted.
+ *
+ * An async body must be awaited by its suite — `await check(...)` — or it will
+ * settle after summary() has already been printed. There is no way to detect
+ * that from here, so the meta-check in this file's own suite exists to prove
+ * that a failing async check is reported at all.
+ */
 function check(name, fn) {
   state.total++;
-  try {
-    fn();
-    console.log(`  ok    ${name}`);
-  } catch (e) {
+  const pass = () => console.log(`  ok    ${name}`);
+  const fail = (e) => {
     state.failures++;
     console.log(`  FAIL  ${name}\n        ${e.message}`);
+  };
+  try {
+    const result = fn();
+    if (result && typeof result.then === 'function') {
+      return result.then(pass, fail);
+    }
+    pass();
+  } catch (e) {
+    fail(e);
   }
+  return undefined;
 }
 
 function assert(condition, message) {

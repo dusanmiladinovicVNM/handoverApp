@@ -34,6 +34,7 @@ import {
 import { AUTOSAVE_DEBOUNCE_MS } from './config.js';
 import { readJson, writeJson, CACHE_KEYS } from './utils/store.js';
 import { rememberDraft, forgetDraft, readDraft, draftSectionIds } from './utils/drafts.js';
+import { track as trackSave, settled as savesSettled } from './utils/pending-saves.js';
 import {
   login as authLogin, setPassword as authSetPassword,
   signOut as authSignOut, suggestDeviceLabel,
@@ -1655,6 +1656,11 @@ export async function pageInspectionSection({ params }) {
 
   function updateSaveIndicator() {
     if (!saveIndicatorEl) return;
+    // The save now outlives the screen that started it, so this can run after
+    // the indicator has been unmounted. replaceWith on a parentless node is a
+    // no-op, but swapping in a fresh detached node every time would keep a
+    // finished screen's furniture alive for no reason.
+    if (!saveIndicatorEl.parentNode) return;
     const cur = getState();
     const fresh = saveIndicator(cur.saveStatus, cur.saveError);
     saveIndicatorEl.replaceWith(fresh);
@@ -1667,7 +1673,9 @@ export async function pageInspectionSection({ params }) {
     Object.keys(pendingItems).forEach(k => delete pendingItems[k]);
     setState({ saveStatus: 'saving' });
     updateSaveIndicator();
-    return api.saveSection(inspectionId, sectionId, itemsToSend,
+    // Tracked, so that locking — the one action whose correctness depends on
+    // the server being current — can wait for it. Nothing else does any more.
+    return trackSave(api.saveSection(inspectionId, sectionId, itemsToSend,
         getState().revisions[sectionId])
       .then((res) => {
         // Only now is the local copy redundant. A failure leaves it in place,
@@ -1703,7 +1711,7 @@ export async function pageInspectionSection({ params }) {
           return;
         }
         toastError('Save failed: ' + (e.code || 'unknown') + ' — ' + (e.message || ''));
-      });
+      }));
   }
 
   const debouncedSave = debounce(flushSave, AUTOSAVE_DEBOUNCE_MS);
@@ -1813,8 +1821,13 @@ export async function pageInspectionSection({ params }) {
         appHeader({
           title: section.title,
           subtitle: insp.propertyAddress,
-          onBack: async () => {
-            await flushSave();
+          // Started, not waited for. What was typed is already in local state
+          // and on the device, and a failure reports itself wherever the person
+          // has got to — so the five seconds this used to spend were spent
+          // making the save look finished, not making it safe. Fifteen sections
+          // to an inspection, and this was most of the time filling one in.
+          onBack: () => {
+            flushSave();
             navigate('/inspection/' + inspectionId);
           },
           actions: [saveIndicatorEl],
@@ -1829,23 +1842,23 @@ export async function pageInspectionSection({ params }) {
         bottomBar(
           h('button', {
             class: 'btn btn--secondary',
-            onClick: async () => {
-              await flushSave();
+            onClick: () => {
+              flushSave();
               navigate('/inspection/' + inspectionId);
             },
           }, 'Sections'),
           nextSection
             ? h('button', {
                 class: 'btn btn--primary bottom-bar__primary',
-                onClick: async () => {
-                  await flushSave();
+                onClick: () => {
+                  flushSave();
                   navigate(`/inspection/${inspectionId}/section/${nextSection.id}`);
                 },
               }, 'Next: ' + nextSection.title + ' →')
             : h('button', {
                 class: 'btn btn--primary bottom-bar__primary',
-                onClick: async () => {
-                  await flushSave();
+                onClick: () => {
+                  flushSave();
                   navigate('/inspection/' + inspectionId);
                 },
               }, 'Done with section'),
@@ -1950,6 +1963,13 @@ export async function pageReview({ params }) {
     if (!ok) return;
     locking = true; render();
     try {
+      // Leaving a section no longer waits for its save, so one may still be in
+      // flight. Locking asks the server whether every required item is
+      // answered, and an answer still on its way is one the server does not
+      // have — the lock would be refused over something visible on this very
+      // screen. This is the only place that waits, and only while something is
+      // actually outstanding.
+      await savesSettled();
       await applyMutationState(await api.lockInspection(inspectionId), inspectionId);
       serverMissing = null;
       toastSuccess('Inspection locked. Ready for signatures.');
