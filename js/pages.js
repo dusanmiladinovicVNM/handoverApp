@@ -1149,6 +1149,14 @@ export function pageAdminList() {
                   : h('ul', { class: 'list' },
                       visibleRows().map(i => h('li', {
                         class: 'list-item',
+                        // For the performance walk, which has to pick a row it
+                        // can actually type into. It used to click the first
+                        // one and fail on a locked inspection with a disabled
+                        // input — a harness that depends on what happens to be
+                        // at the top of the workbook does not measure the same
+                        // thing twice. An attribute rather than the badge text,
+                        // which is written for people and will be translated.
+                        'data-status': i.status,
                         onClick: () => navigate('/admin/inspection/' + i.inspectionId),
                       },
                         h('div', { class: 'list-item__row' },
