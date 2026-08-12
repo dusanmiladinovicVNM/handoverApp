@@ -219,7 +219,11 @@ const DriveService = (function () {
       _file(() => existing.next().setTrashed(true));
     }
     const file = _file(() => folder.createFile(fileBlob.setName(fileName)));
-    return { fileId: file.getId(), url: `https://drive.google.com/file/d/${file.getId()}/view` };
+    // The id, and not a Drive URL beside it. That URL was only readable if the
+    // output folder was shared with whoever followed it, and the app now serves
+    // the report itself — see PdfService.downloadPdf. Nobody read it here; a
+    // link sitting in a return value is read eventually.
+    return { fileId: file.getId() };
   }
 
   function saveJsonFile(inspectionId, jsonString, fileName) {

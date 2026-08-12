@@ -34,6 +34,7 @@ const suites = [
   ['API timeouts', require('./api-timeouts.test')],
   ['Inspection lifecycle', require('./lifecycle.test')],
   ['Validator parity', require('./validator-parity.test')],
+  ['Reading the final PDF', require('./pdf-download.test')],
   ['Markup safety', require('./markup.test')],
 ];
 

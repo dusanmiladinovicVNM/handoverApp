@@ -61,6 +61,7 @@ function CONFIG_DEFAULTS() {
     ['maxAttachmentsPerInspection', '80', 'Max photos per inspection'],
     ['imageMaxDimPx', '1600', 'Frontend should compress to this max dimension'],
     ['imageJpegQuality', '0.75', 'Frontend JPEG compression quality 0-1'],
+    ['maxPdfDownloadMb', '20', 'Largest final PDF downloadPdf will return in one response'],
     ['appName', 'Handover', 'Name used in outgoing email'],
     ['pbkdf2Iterations', '1000', 'Password work factor — set from benchmarkPbkdf2()'],
     ['passwordMinLength', '16', 'Minimum password length — long enough to force a phrase'],
@@ -384,7 +385,7 @@ function verifyDeployment() {
       'saveSection', 'lockInspection', 'unlockInspection', 'listInspections']],
     ['AttachmentService', () => AttachmentService, ['uploadAttachment', 'deleteAttachment']],
     ['SignatureService', () => SignatureService, ['saveSignature']],
-    ['PdfService', () => PdfService, ['finalizeInspection']],
+    ['PdfService', () => PdfService, ['finalizeInspection', 'downloadPdf']],
     ['DriveService', () => DriveService, ['createInspectionFolders', 'getThumbnailUrl',
       'getInspectionFolder', 'getSubfolder', 'getStats']],
     ['SchemaService', () => SchemaService, ['listActiveSchemas', 'getSchemaJson',
@@ -431,7 +432,7 @@ function verifyDeployment() {
     'createInspection', 'getInspection', 'saveSection',
     'lockInspection', 'unlockInspection', 'regenerateTenantToken', 'listInspections',
     'uploadAttachment', 'deleteAttachment', 'saveSignature', 'finalizeInspection',
-    'getAuditLog',
+    'downloadPdf', 'getAuditLog',
   ];
   try {
     const actions = Router.listActions();

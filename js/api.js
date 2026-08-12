@@ -183,6 +183,13 @@ export const api = {
   // --- Finalize ---
   finalizeInspection: (inspectionId) =>
     call('finalizeInspection', { inspectionId }, API_TIMEOUT_FINALIZE),
+  // The report itself, base64 in the reply. Reading it is authorized like every
+  // other action rather than by Drive's sharing setting, which is why the app
+  // no longer links to drive.google.com. Given the upload timeout: the server
+  // reads a file of a few megabytes and encodes it, and phones on site are not
+  // on good connections.
+  downloadPdf: (inspectionId) =>
+    call('downloadPdf', { inspectionId }, API_TIMEOUT_UPLOAD),
 
   // --- Audit ---
   getAuditLog: (inspectionId) => call('getAuditLog', { inspectionId }),

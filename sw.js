@@ -59,6 +59,7 @@ const APP_SHELL = [
   './assets/icons/icon-512.png',
   './js/utils/image.js',
   './js/utils/format.js',
+  './js/utils/download.js',
 ];
 
 self.addEventListener('install', (event) => {

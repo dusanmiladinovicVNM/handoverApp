@@ -131,7 +131,7 @@ module.exports = function run() {
   check('the routing table is readable once everything has loaded', () => {
     const actions = Router.listActions();
     assert(actions.length > 0, 'no actions registered');
-    ['login', 'setPassword', 'saveSignature', 'finalizeInspection']
+    ['login', 'setPassword', 'saveSignature', 'finalizeInspection', 'downloadPdf']
       .forEach(a => assert(actions.indexOf(a) >= 0, `missing route: ${a}`));
   });
 
