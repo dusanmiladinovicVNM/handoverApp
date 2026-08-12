@@ -11,6 +11,7 @@ import {
   API_TIMEOUT_DEFAULT,
   API_TIMEOUT_UPLOAD,
   API_TIMEOUT_FINALIZE,
+  API_TIMEOUT_SIGN_IN,
 } from './config.js';
 
 class ApiError extends Error {
@@ -114,16 +115,24 @@ async function _send(action, data, timeoutMs, auth) {
 
 export const api = {
   // --- Sign-in (no session required) ---
-  login: (data) => callPublic('login', data),
-  setPassword: (data) => callPublic('setPassword', data),
+  //
+  // The three that derive a password hash get their own timeout: it is by far
+  // the most expensive thing this backend does, and on the default they timed
+  // out while succeeding. See API_TIMEOUT_SIGN_IN.
+  //
+  // requestPasswordReset and refreshSession derive nothing — the first sends a
+  // link, the second verifies a token — so they stay on the default.
+  login: (data) => callPublic('login', data, API_TIMEOUT_SIGN_IN),
+  setPassword: (data) => callPublic('setPassword', data, API_TIMEOUT_SIGN_IN),
   requestPasswordReset: (email) => callPublic('requestPasswordReset', { email }),
   refreshSession: (deviceToken) => callPublic('refreshSession', { deviceToken }),
 
   // --- Own account ---
   me: () => call('me'),
   signOut: () => call('signOut'),
+  // Two derivations: verifying the old password and hashing the new one.
   changePassword: (oldPassword, newPassword) =>
-    call('changePassword', { oldPassword, newPassword }),
+    call('changePassword', { oldPassword, newPassword }, API_TIMEOUT_SIGN_IN),
 
   // --- Account administration ---
   listUsers: () => call('listUsers'),
