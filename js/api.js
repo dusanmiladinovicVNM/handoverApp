@@ -6,6 +6,7 @@
  * CORS preflight (Apps Script does not support OPTIONS).
  */
 
+import { t } from './i18n.js';
 import {
   BACKEND_URL,
   API_TIMEOUT_DEFAULT,
@@ -82,9 +83,9 @@ async function _send(action, data, timeoutMs, auth) {
   } catch (e) {
     clearTimeout(timer);
     if (e.name === 'AbortError') {
-      throw new ApiError('NETWORK_TIMEOUT', `Request '${action}' timed out.`);
+      throw new ApiError('NETWORK_TIMEOUT', t('api.timeout', { action }));
     }
-    throw new ApiError('NETWORK_ERROR', e.message || 'Network request failed.');
+    throw new ApiError('NETWORK_ERROR', e.message || t('api.network'));
   }
   clearTimeout(timer);
 
@@ -99,7 +100,7 @@ async function _send(action, data, timeoutMs, auth) {
   try {
     body = await response.json();
   } catch (e) {
-    throw new ApiError('INVALID_RESPONSE', 'Server returned non-JSON response.');
+    throw new ApiError('INVALID_RESPONSE', t('api.invalidResponse'));
   }
 
   if (!body.ok) {

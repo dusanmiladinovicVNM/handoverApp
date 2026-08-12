@@ -14,6 +14,8 @@
  * Query params come after `?` — used for tenant token (?t=...).
  */
 
+import { t } from './i18n.js';
+
 const _routes = [];
 let _onChange = null;
 
@@ -43,6 +45,19 @@ export function navigate(path, replace = false) {
 
 export function back() {
   history.back();
+}
+
+/**
+ * Draw the current route again, without touching the address bar.
+ *
+ * Used when something outside the URL changes what every screen should say —
+ * today that is only the language. It goes through handleHashChange rather than
+ * calling the handler directly so the onChange hook runs too, and the page
+ * being replaced gets its cleanup: the section editor flushes what was typed
+ * before it is torn down.
+ */
+export function refresh() {
+  handleHashChange();
 }
 
 function parseHash() {
@@ -110,11 +125,11 @@ let _notFoundHandler = (path) => {
 
   const title = document.createElement('h1');
   title.className = 'page__title';
-  title.textContent = 'Not found';
+  title.textContent = t('notFound.title');
 
   const body = document.createElement('p');
   body.className = 'text-muted';
-  body.append('No route for ');
+  body.append(t('notFound.body'));
   const code = document.createElement('code');
   code.textContent = path;
   body.append(code);

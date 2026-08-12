@@ -5,6 +5,7 @@
  */
 
 import { IMAGE_MAX_DIM_PX, IMAGE_JPEG_QUALITY } from '../config.js';
+import { t } from '../i18n.js';
 
 /**
  * Compress a File or Blob image:
@@ -44,7 +45,7 @@ export async function compressImage(file, opts = {}) {
 
   const blob = await new Promise((resolve, reject) => {
     canvas.toBlob(
-      (b) => b ? resolve(b) : reject(new Error('toBlob returned null')),
+      (b) => b ? resolve(b) : reject(new Error(t('image.encodeFailed'))),
       'image/jpeg',
       quality
     );
@@ -75,7 +76,7 @@ function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Failed to load image'));
+    img.onerror = () => reject(new Error(t('image.loadFailed')));
     img.src = src;
   });
 }

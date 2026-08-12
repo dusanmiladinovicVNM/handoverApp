@@ -1,7 +1,14 @@
 /**
  * utils/format.js
  * Formatting helpers (dates, statuses, etc).
+ *
+ * The date format is the same in both languages — dd.mm.yyyy is what Swiss
+ * German writes and what this app has always shown — so only the words are
+ * translated, and they are looked up per call rather than captured in a table,
+ * because the language can change while the app is open.
  */
+
+import { t } from '../i18n.js';
 
 export function formatDate(iso) {
   if (!iso) return '—';
@@ -29,16 +36,6 @@ export function formatDateTime(iso) {
   }
 }
 
-const STATUS_LABELS = {
-  draft: 'Draft',
-  under_review: 'Under Review',
-  locked_for_signature: 'Awaiting Signature',
-  partially_signed: 'Partially Signed',
-  signed: 'Signed',
-  archived: 'Archived',
-  cancelled: 'Cancelled',
-};
-
 const STATUS_BADGE_CLASS = {
   draft: 'badge--draft',
   under_review: 'badge--review',
@@ -49,22 +46,22 @@ const STATUS_BADGE_CLASS = {
   cancelled: 'badge--cancelled',
 };
 
+/**
+ * A status the app does not know is shown as the server named it, rather than
+ * as a missing translation. Same for the type below.
+ */
 export function statusLabel(status) {
-  return STATUS_LABELS[status] || status;
+  const key = 'status.' + status;
+  const label = t(key);
+  return label === key ? status : label;
 }
 
 export function statusBadgeClass(status) {
   return STATUS_BADGE_CLASS[status] || 'badge--draft';
 }
 
-const TYPE_LABELS = {
-  move_in: 'Move-in',
-  move_out: 'Move-out',
-  periodic: 'Periodic',
-  damage_report: 'Damage Report',
-  key_handover: 'Key Handover',
-};
-
 export function inspectionTypeLabel(type) {
-  return TYPE_LABELS[type] || type;
+  const key = 'type.' + type;
+  const label = t(key);
+  return label === key ? type : label;
 }

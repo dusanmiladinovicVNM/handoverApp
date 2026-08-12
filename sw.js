@@ -21,7 +21,7 @@
  * Regenerate by running `node tests/run.js`; the shell-cache check prints the
  * value to paste in when it no longer matches.
  */
-const SHELL_HASH = 'e5194dc0b7c4';
+const SHELL_HASH = '56d53ace30e9';
 const CACHE_VERSION = `handover-${SHELL_HASH}`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
@@ -59,6 +59,8 @@ const APP_SHELL = [
   './assets/icons/icon-512.png',
   './js/utils/image.js',
   './js/utils/format.js',
+  './js/i18n.js',
+  './js/i18n-content.js',
 ];
 
 self.addEventListener('install', (event) => {

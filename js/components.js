@@ -15,6 +15,7 @@
 
 import { h, escapeHtml, debounce } from './utils/dom.js';
 import { statusLabel, statusBadgeClass } from './utils/format.js';
+import { t, tn, tc, getLang, setLang, languages } from './i18n.js';
 import { compressImage } from './utils/image.js';
 import { api } from './api.js';
 import { toastError, toastSuccess, confirm } from './ui.js';
@@ -25,16 +26,52 @@ import { MAX_ATTACHMENTS_PER_ITEM, AUTOSAVE_DEBOUNCE_MS } from './config.js';
 // App header / bottom bar
 // ============================================================
 
-export function appHeader({ title, subtitle, onBack, actions }) {
+/**
+ * The bar every screen wears.
+ *
+ * The language switch lives here rather than in a settings screen because the
+ * people who most need it never reach one: a tenant arrives from a link, signs,
+ * and leaves. Pass `lang: false` where the actions slot is already spoken for —
+ * the section editor keeps its save indicator there.
+ */
+export function appHeader({ title, subtitle, onBack, actions, lang }) {
+  const trailing = [];
+  if (actions) trailing.push(actions);
+  if (lang !== false) trailing.push(langToggle());
+
   return h('header', { class: 'app-header' },
     onBack
-      ? h('button', { class: 'app-header__back', onClick: onBack, 'aria-label': 'Back' }, '←')
+      ? h('button', { class: 'app-header__back', onClick: onBack, 'aria-label': t('action.back') }, '←')
       : null,
     h('div', { style: { flex: '1', minWidth: '0' } },
       h('h1', { class: 'app-header__title' }, title),
       subtitle ? h('p', { class: 'app-header__subtitle' }, subtitle) : null,
     ),
-    actions ? h('div', { class: 'app-header__actions' }, actions) : null,
+    trailing.length ? h('div', { class: 'app-header__actions' }, trailing) : null,
+  );
+}
+
+/**
+ * DE | EN.
+ *
+ * Both options are always shown rather than a single button that toggles,
+ * because a toggle labelled with the other language is ambiguous — half of
+ * everyone reads "EN" as "you are in English" and the other half as "switch to
+ * English". Two buttons with one of them marked cannot be misread.
+ *
+ * Setting the language redraws the current route; see app.js.
+ */
+export function langToggle() {
+  const current = getLang();
+  return h('div', { class: 'lang-toggle', role: 'group', 'aria-label': t('lang.switch') },
+    languages().map(l => h('button', {
+      class: ['lang-toggle__option', l.code === current ? 'lang-toggle__option--active' : null],
+      type: 'button',
+      lang: l.code,
+      title: l.label,
+      'aria-pressed': l.code === current ? 'true' : 'false',
+      onClick: () => setLang(l.code),
+    }, l.short)),
   );
 }
 
@@ -59,10 +96,10 @@ export function progressBar(value, max) {
 
 export function saveIndicator(status, errorText) {
   const labels = {
-    idle:   { text: 'No changes', cls: '' },
-    saving: { text: 'Saving…', cls: 'save-indicator--saving' },
-    saved:  { text: 'Saved', cls: 'save-indicator--saved' },
-    error:  { text: errorText || 'Save failed', cls: 'save-indicator--error' },
+    idle:   { text: t('save.idle'), cls: '' },
+    saving: { text: t('save.saving'), cls: 'save-indicator--saving' },
+    saved:  { text: t('save.saved'), cls: 'save-indicator--saved' },
+    error:  { text: errorText || t('save.error'), cls: 'save-indicator--error' },
   };
   const cur = labels[status] || labels.idle;
   return h('div', { class: ['save-indicator', cur.cls] },
@@ -141,7 +178,7 @@ export function questionCard(item, value, comment, attachments, opts) {
     if (commentVisible) {
       commentNode = h('textarea', {
         class: 'form-textarea',
-        placeholder: 'Add a note',
+        placeholder: t('question.notePlaceholder'),
         disabled: disabled || undefined,
         onInput: (e) => handleCommentChange(e.target.value),
       }, currentComment || '');
@@ -160,9 +197,9 @@ export function questionCard(item, value, comment, attachments, opts) {
         commentSlot.innerHTML = '';
         const built = buildCommentArea();
         if (built) commentSlot.appendChild(built);
-        toggleNode.textContent = commentVisible ? '− Hide comment' : '+ Add comment';
+        toggleNode.textContent = commentVisible ? t('question.hideComment') : t('question.addComment');
       },
-    }, comment ? '− Hide comment' : '+ Add comment');
+    }, comment ? t('question.hideComment') : t('question.addComment'));
   }
 
   // Attachments
@@ -174,10 +211,10 @@ export function questionCard(item, value, comment, attachments, opts) {
   const cardEl = h('div', { class: ['question', isMissing ? 'question--required-missing' : null] },
     // Label
     h('div', { class: 'question__label' },
-      h('span', null, item.label),
-      item.required ? h('span', { class: 'question__required-mark', 'aria-label': 'required' }, '*') : null,
+      h('span', null, tc(item.label)),
+      item.required ? h('span', { class: 'question__required-mark', 'aria-label': t('question.required') }, '*') : null,
     ),
-    item.help ? h('p', { class: 'question__help' }, item.help) : null,
+    item.help ? h('p', { class: 'question__help' }, tc(item.help)) : null,
 
     // Input
     inputSlot,
@@ -270,7 +307,7 @@ function renderInput(item, value, onChange, disabled) {
       },
     },
       h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
-      h('span', { class: 'form-check__label' }, item.label),
+      h('span', { class: 'form-check__label' }, tc(item.label)),
     );
   }
 
@@ -280,9 +317,9 @@ function renderInput(item, value, onChange, disabled) {
       disabled: disabled || undefined,
       onChange: (e) => handleChange(e.target.value),
     },
-      h('option', { value: '' }, '— Choose —'),
+      h('option', { value: '' }, t('input.choose')),
       (item.options || []).map(opt =>
-        h('option', { value: opt.value, selected: value === opt.value }, opt.label)
+        h('option', { value: opt.value, selected: value === opt.value }, tc(opt.label))
       ),
     );
   }
@@ -310,7 +347,7 @@ function renderInput(item, value, onChange, disabled) {
           },
         },
           h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
-          h('span', { class: 'form-check__label' }, opt.label),
+          h('span', { class: 'form-check__label' }, tc(opt.label)),
         );
       })
     );
@@ -346,14 +383,14 @@ function renderInput(item, value, onChange, disabled) {
           },
         },
           h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
-          h('span', { class: 'form-check__label' }, opt.label),
+          h('span', { class: 'form-check__label' }, tc(opt.label)),
         );
       })
     );
   }
 
   // Fallback
-  return h('div', { class: 'text-muted' }, `Unsupported type: ${item.type}`);
+  return h('div', { class: 'text-muted' }, t('input.unsupported', { type: item.type }));
 }
 
 // ============================================================
@@ -373,19 +410,24 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
         disabled ? null : h('button', {
           class: 'image-grid__item-remove',
           onClick: async () => {
-            const ok = await confirm({ title: 'Remove photo?', message: 'This cannot be undone.', confirmLabel: 'Remove', danger: true });
+            const ok = await confirm({
+              title: t('photo.removeTitle'),
+              message: t('photo.removeMessage'),
+              confirmLabel: t('action.remove'),
+              danger: true,
+            });
             if (!ok) return;
             try {
               await api.deleteAttachment(inspectionId, att.attachmentId);
               removeAttachmentLocally(att.attachmentId);
               if (onRemove) onRemove(att);
               rebuild();
-              toastSuccess('Photo removed');
+              toastSuccess(t('photo.removed'));
             } catch (e) {
-              toastError(e.message || 'Failed to remove photo');
+              toastError(e.message || t('photo.removeFailed'));
             }
           },
-          'aria-label': 'Remove photo',
+          'aria-label': t('photo.remove'),
         }, '×'),
       );
       container.appendChild(item);
@@ -407,7 +449,7 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
       const addBtn = h('button', {
         class: 'image-grid__add',
         onClick: () => fileInput.click(),
-        'aria-label': 'Add photo',
+        'aria-label': t('photo.add'),
       }, '＋');
       container.appendChild(addBtn);
       container.appendChild(fileInput);
@@ -441,9 +483,9 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
       addAttachmentLocally(attachment);
       if (onAdd) onAdd(attachment);
       rebuild();
-      toastSuccess('Photo uploaded');
+      toastSuccess(t('photo.uploaded'));
     } catch (e) {
-      toastError(e.message || 'Photo upload failed');
+      toastError(e.message || t('photo.uploadFailed'));
       if (busyEl && busyEl.parentNode) busyEl.parentNode.removeChild(busyEl);
     }
   }
@@ -451,8 +493,7 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
   rebuild();
   const wrapper = h('div', null,
     container,
-    minCount > 0 ? h('p', { class: 'form-help mt-2' },
-      `At least ${minCount} photo${minCount > 1 ? 's' : ''} required.`) : null,
+    minCount > 0 ? h('p', { class: 'form-help mt-2' }, tn('photo.min', minCount)) : null,
   );
   return wrapper;
 }
@@ -468,7 +509,7 @@ export function signatureCanvas() {
   const canvas = document.createElement('canvas');
   canvas.className = 'signature-pad__canvas';
 
-  const hint = h('div', { class: 'signature-pad__hint' }, 'Sign here');
+  const hint = h('div', { class: 'signature-pad__hint' }, t('signature.hint'));
   const pad = h('div', { class: 'signature-pad' }, canvas, hint);
 
   let drawing = false;

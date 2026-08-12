@@ -8,7 +8,11 @@ Web app for landlord/tenant apartment inspections (move-in, move-out, periodic, 
 - Storage: Google Sheet (canonical metadata) + Google Drive (photos, signatures, PDFs)
 - PDF generation: Google Doc template → PDF export
 
-**Working language**: English only.
+**Working language**: English — code, comments, docs, and the schemas in the
+Schemas sheet.
+
+**Interface languages**: German (Swiss) and English, switchable in the app.
+German is the default. See "Languages" below.
 
 ---
 
@@ -59,6 +63,8 @@ handover-app/
       ui.js                  ← toasts, modals
       components.js          ← question card, image uploader, signature pad
       pages.js               ← all page renderers
+      i18n.js                ← language choice + the app's own strings
+      i18n-content.js        ← the seeded schemas, in German
       utils/
         dom.js               ← h() helper
         image.js             ← canvas-based compression
@@ -81,6 +87,35 @@ handover-app/
    ```
 4. Push to GitHub. GitHub Pages picks it up automatically.
 5. Visit `https://<username>.github.io/handover-app/` and create a test inspection.
+
+---
+
+## Languages
+
+The interface is German (Swiss) or English. German is the default; a browser
+that asks for English gets English, and anything else — French, Italian — gets
+German. The choice is stored per device under `handover.lang` and switched from
+the `DE | EN` control in the header, or in full on the account screen.
+
+Two files, and the split matters:
+
+- `js/i18n.js` — everything the app says on its own behalf, keyed. German is
+  Swiss German: **no "ß"**, and Swiss vocabulary (Lavabo, Boiler, Dampfabzug,
+  Mietzinsdepot). `node tests/run.js` fails on a "ß".
+- `js/i18n-content.js` — the inspection forms. Section titles, question labels
+  and option labels live in the Schemas sheet in English; this maps that English
+  to German on the way to the screen. Text it does not recognise is shown as it
+  came, so a question added to the sheet always renders.
+
+**Adding a question to a schema** means adding its label to `i18n-content.js`
+too. The test suite reads `gas/SchemaSeed.gs` and fails if a seeded string has
+no German, in either direction — an untranslated label and an orphaned
+translation are both reported.
+
+Not translated: the generated PDF. `PdfService.gs` builds it from the labels
+stored in the sheet, which are English, so the report is English whatever the
+app is set to. Translating it means translating the schemas in the sheet, not
+the frontend.
 
 ---
 

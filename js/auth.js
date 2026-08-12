@@ -11,6 +11,7 @@
  */
 
 import { setAuth, api } from './api.js';
+import { t } from './i18n.js';
 import { setState } from './state.js';
 import { navigate } from './router.js';
 import { readJson, writeJson, clearCaches, CACHE_KEYS } from './utils/store.js';
@@ -230,7 +231,7 @@ async function _verifyInBackground() {
   setState({
     authMode: 'none',
     user: null,
-    authError: 'Your session has ended. Please sign in again.',
+    authError: t('login.sessionEnded'),
   });
   navigate('/login', true);
 }

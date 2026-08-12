@@ -20,7 +20,7 @@ import { api, ApiError, setAuth } from './api.js';
 import { navigate, back } from './router.js';
 import {
   appHeader, bottomBar, badge, progressBar, saveIndicator,
-  questionCard, signatureCanvas
+  questionCard, signatureCanvas, langToggle
 } from './components.js';
 import { toastSuccess, toastError, toastWarning, confirm, openModal } from './ui.js';
 import {
@@ -32,6 +32,7 @@ import {
   inspectionProgress, findAllMissingRequired
 } from './validator.js';
 import { AUTOSAVE_DEBOUNCE_MS } from './config.js';
+import { t, tn, tc } from './i18n.js';
 import { readJson, writeJson, CACHE_KEYS } from './utils/store.js';
 import { rememberDraft, forgetDraft, readDraft, draftSectionIds } from './utils/drafts.js';
 import { track as trackSave, settled as savesSettled } from './utils/pending-saves.js';
@@ -132,7 +133,7 @@ export function pageLogin() {
   async function submit(e) {
     if (e) e.preventDefault();
     if (!email.trim() || !password) {
-      error = 'Enter your email address and password.';
+      error = t('login.missingFields');
       render();
       return;
     }
@@ -144,14 +145,14 @@ export function pageLogin() {
         remember,
         deviceLabel: suggestDeviceLabel(),
       });
-      toastSuccess(`Signed in as ${user.name}.`);
+      toastSuccess(t('login.welcome', { name: user.name }));
       navigate('/admin');
     } catch (err) {
       // The server answers identically for an unknown address, a wrong
       // password and a disabled account, so that the form cannot be used to
       // find out who works here. Passing its message straight through keeps
       // that property intact.
-      error = err.message || 'Sign-in failed.';
+      error = err.message || t('login.failed');
       password = '';
       busy = false;
       render();
@@ -160,11 +161,10 @@ export function pageLogin() {
 
   function render() {
     const state = getState();
-    mount(root(), authShell('Sign in',
+    mount(root(), authShell(t('login.title'),
       h('form', { class: 'card', onSubmit: submit },
-        h('h2', { class: 'card__title' }, 'Sign in'),
-        h('p', { class: 'text-muted text-sm mt-2' },
-          'Use the email address your account was created with.'),
+        h('h2', { class: 'card__title' }, t('login.title')),
+        h('p', { class: 'text-muted text-sm mt-2' }, t('login.intro')),
 
         error || state.authError
           ? h('div', { class: 'banner banner--danger mt-3' },
@@ -173,7 +173,7 @@ export function pageLogin() {
           : null,
 
         h('div', { class: 'mt-4' },
-          formField('Email', {
+          formField(t('login.email'), {
             type: 'email',
             autocomplete: 'username',
             inputmode: 'email',
@@ -181,7 +181,7 @@ export function pageLogin() {
             autofocus: true,
             onInput: (e) => { email = e.target.value; },
           }),
-          formField('Password', {
+          formField(t('login.password'), {
             type: 'password',
             autocomplete: 'current-password',
             onInput: (e) => { password = e.target.value; },
@@ -194,21 +194,20 @@ export function pageLogin() {
             checked: remember,
             onChange: (e) => { remember = e.target.checked; },
           }),
-          h('span', null, 'Remember this device'),
+          h('span', null, t('login.remember')),
         ),
 
         h('button', {
           type: 'submit',
           class: 'btn btn--primary btn--block mt-4',
           disabled: busy || undefined,
-        }, busy ? 'Signing in…' : 'Sign in'),
+        }, busy ? t('login.submitting') : t('login.submit')),
 
         h('p', { class: 'text-sm mt-4', style: { textAlign: 'center' } },
-          h('a', { href: '#/forgot-password' }, 'Forgot your password?')),
+          h('a', { href: '#/forgot-password' }, t('login.forgot'))),
 
         h('hr', { style: { border: 'none', borderTop: '1px solid var(--color-border)', margin: '1.5rem 0' }}),
-        h('p', { class: 'text-xs text-muted' },
-          'Tenants do not sign in — they receive a direct link for their inspection.'),
+        h('p', { class: 'text-xs text-muted' }, t('login.tenantNote')),
       )
     ));
   }
@@ -230,7 +229,7 @@ export function pageSetPassword(ctx) {
   async function submit(e) {
     if (e) e.preventDefault();
     if (password !== confirmValue) {
-      error = 'The two passwords do not match.';
+      error = t('setPassword.mismatch');
       render();
       return;
     }
@@ -239,13 +238,13 @@ export function pageSetPassword(ctx) {
       const user = await authSetPassword({
         token, password, remember, deviceLabel: suggestDeviceLabel(),
       });
-      toastSuccess(`Welcome, ${user.name}.`);
+      toastSuccess(t('setPassword.welcome', { name: user.name }));
       navigate('/admin');
     } catch (err) {
       // Length and common-padding rules are enforced on the server, so its
       // wording is the authoritative one. Repeating the rules here would mean
       // two places to keep in step, and the client copy losing.
-      error = err.message || 'Could not set the password.';
+      error = err.message || t('setPassword.failed');
       busy = false;
       render();
     }
@@ -253,24 +252,21 @@ export function pageSetPassword(ctx) {
 
   function render() {
     if (!token) {
-      mount(root(), authShell('Set password',
+      mount(root(), authShell(t('setPassword.title'),
         h('div', { class: 'card' },
-          h('h2', { class: 'card__title' }, 'This link is incomplete'),
-          h('p', { class: 'text-muted text-sm mt-2' },
-            'Open the link from your email exactly as it was sent, or ask for a new one.'),
+          h('h2', { class: 'card__title' }, t('setPassword.incompleteTitle')),
+          h('p', { class: 'text-muted text-sm mt-2' }, t('setPassword.incompleteBody')),
           h('a', { class: 'btn btn--secondary btn--block mt-4', href: '#/forgot-password' },
-            'Send me a new link'),
+            t('setPassword.newLink')),
         )
       ));
       return;
     }
 
-    mount(root(), authShell('Set password',
+    mount(root(), authShell(t('setPassword.title'),
       h('form', { class: 'card', onSubmit: submit },
-        h('h2', { class: 'card__title' }, 'Choose your password'),
-        h('p', { class: 'text-muted text-sm mt-2' },
-          'Four unrelated words make a password that is easy to remember and ' +
-          'hard to guess — far better than a short one with symbols in it.'),
+        h('h2', { class: 'card__title' }, t('setPassword.choose')),
+        h('p', { class: 'text-muted text-sm mt-2' }, t('setPassword.advice')),
 
         error
           ? h('div', { class: 'banner banner--danger mt-3' },
@@ -279,13 +275,13 @@ export function pageSetPassword(ctx) {
           : null,
 
         h('div', { class: 'mt-4' },
-          formField('New password', {
+          formField(t('setPassword.new'), {
             type: 'password',
             autocomplete: 'new-password',
             autofocus: true,
             onInput: (e) => { password = e.target.value; },
-          }, 'At least 16 characters.'),
-          formField('Repeat password', {
+          }, t('setPassword.minLength')),
+          formField(t('setPassword.repeat'), {
             type: 'password',
             autocomplete: 'new-password',
             onInput: (e) => { confirmValue = e.target.value; },
@@ -298,17 +294,16 @@ export function pageSetPassword(ctx) {
             checked: remember,
             onChange: (e) => { remember = e.target.checked; },
           }),
-          h('span', null, 'Remember this device'),
+          h('span', null, t('login.remember')),
         ),
 
         h('button', {
           type: 'submit',
           class: 'btn btn--primary btn--block mt-4',
           disabled: busy || undefined,
-        }, busy ? 'Saving…' : 'Set password and sign in'),
+        }, busy ? t('action.saving') : t('setPassword.submit')),
 
-        h('p', { class: 'text-xs text-muted mt-3' },
-          'Any device already signed in to this account will be signed out.'),
+        h('p', { class: 'text-xs text-muted mt-3' }, t('setPassword.signsOutOthers')),
       )
     ));
   }
@@ -332,7 +327,7 @@ export function pageForgotPassword() {
       await api.requestPasswordReset(email.trim());
       sent = true;
     } catch (err) {
-      error = err.message || 'Could not send the link.';
+      error = err.message || t('forgot.failed');
     } finally {
       busy = false;
       render();
@@ -340,29 +335,26 @@ export function pageForgotPassword() {
   }
 
   function render() {
-    mount(root(), authShell('Password reset',
+    mount(root(), authShell(t('forgot.title'),
       sent
         ? h('div', { class: 'card' },
-            h('h2', { class: 'card__title' }, 'Check your inbox'),
+            h('h2', { class: 'card__title' }, t('forgot.sentTitle')),
             // Deliberately not "we sent you an email": the server answers the
             // same way whether or not the address has an account, and saying
             // more here would give away what it withholds.
-            h('p', { class: 'text-muted text-sm mt-2' },
-              'If that address belongs to an account, a link is on its way. ' +
-              'It is valid for 48 hours and can be used once.'),
+            h('p', { class: 'text-muted text-sm mt-2' }, t('forgot.sentBody')),
             h('a', { class: 'btn btn--secondary btn--block mt-4', href: '#/login' },
-              'Back to sign in'))
+              t('forgot.backToLogin')))
         : h('form', { class: 'card', onSubmit: submit },
-            h('h2', { class: 'card__title' }, 'Send a reset link'),
-            h('p', { class: 'text-muted text-sm mt-2' },
-              'We will email you a link on which you can choose a new password.'),
+            h('h2', { class: 'card__title' }, t('forgot.formTitle')),
+            h('p', { class: 'text-muted text-sm mt-2' }, t('forgot.formBody')),
             error
               ? h('div', { class: 'banner banner--danger mt-3' },
                   h('div', { class: 'banner__icon' }, '!'),
                   h('div', { class: 'banner__body' }, error))
               : null,
             h('div', { class: 'mt-4' },
-              formField('Email', {
+              formField(t('login.email'), {
                 type: 'email',
                 autocomplete: 'username',
                 inputmode: 'email',
@@ -373,9 +365,9 @@ export function pageForgotPassword() {
               type: 'submit',
               class: 'btn btn--primary btn--block mt-4',
               disabled: busy || undefined,
-            }, busy ? 'Sending…' : 'Send link'),
+            }, busy ? t('forgot.submitting') : t('forgot.submit')),
             h('p', { class: 'text-sm mt-4', style: { textAlign: 'center' } },
-              h('a', { href: '#/login' }, 'Back to sign in')),
+              h('a', { href: '#/login' }, t('forgot.backToLogin'))),
           )
     ));
   }
@@ -396,7 +388,7 @@ export function pageProfile() {
   async function submit(e) {
     if (e) e.preventDefault();
     if (newPassword !== confirmValue) {
-      error = 'The two new passwords do not match.';
+      error = t('profile.mismatch');
       render();
       return;
     }
@@ -407,10 +399,10 @@ export function pageProfile() {
       // out locally keeps the app honest about that rather than leaving it
       // holding a token the server has already stopped accepting.
       await authSignOut();
-      toastSuccess('Password changed. Please sign in again.');
+      toastSuccess(t('profile.changed'));
       navigate('/login');
     } catch (err) {
-      error = err.message || 'Could not change the password.';
+      error = err.message || t('profile.failed');
       busy = false;
       render();
     }
@@ -420,37 +412,45 @@ export function pageProfile() {
     const user = getState().user || {};
     mount(root(),
       h('div', { class: 'app-layout' },
-        appHeader({ title: 'My account', onBack: () => navigate('/admin') }),
+        appHeader({ title: t('profile.title'), onBack: () => navigate('/admin') }),
         h('main', { class: 'app-body' },
           h('div', { class: 'page' },
             h('div', { class: 'card' },
               h('h2', { class: 'card__title' }, user.name || ''),
               h('p', { class: 'text-muted text-sm mt-1' }, user.email || ''),
               h('p', { class: 'text-sm mt-3' },
-                h('span', { class: 'badge' }, user.role === 'admin' ? 'Admin' : 'Inspector')),
+                h('span', { class: 'badge' }, t(user.role === 'admin' ? 'role.admin' : 'role.inspector'))),
+            ),
+
+            // The switch in the header is a two-letter chip, which is right for
+            // a bar someone glances at and wrong for the one screen where they
+            // came looking for the setting. Same state, named in full.
+            h('div', { class: 'card mt-4' },
+              h('h2', { class: 'card__title' }, t('profile.language')),
+              h('div', { class: 'mt-3' }, langToggle()),
+              h('p', { class: 'form-hint text-xs text-muted mt-2' }, t('profile.languageHint')),
             ),
 
             h('form', { class: 'card mt-4', onSubmit: submit },
-              h('h2', { class: 'card__title' }, 'Change password'),
-              h('p', { class: 'text-muted text-sm mt-2' },
-                'All signed-in devices will be signed out, including this one.'),
+              h('h2', { class: 'card__title' }, t('profile.changePassword')),
+              h('p', { class: 'text-muted text-sm mt-2' }, t('profile.changeWarning')),
               error
                 ? h('div', { class: 'banner banner--danger mt-3' },
                     h('div', { class: 'banner__icon' }, '!'),
                     h('div', { class: 'banner__body' }, error))
                 : null,
               h('div', { class: 'mt-4' },
-                formField('Current password', {
+                formField(t('profile.current'), {
                   type: 'password',
                   autocomplete: 'current-password',
                   onInput: (e) => { oldPassword = e.target.value; },
                 }),
-                formField('New password', {
+                formField(t('profile.new'), {
                   type: 'password',
                   autocomplete: 'new-password',
                   onInput: (e) => { newPassword = e.target.value; },
-                }, 'At least 16 characters.'),
-                formField('Repeat new password', {
+                }, t('setPassword.minLength')),
+                formField(t('profile.repeat'), {
                   type: 'password',
                   autocomplete: 'new-password',
                   onInput: (e) => { confirmValue = e.target.value; },
@@ -460,7 +460,7 @@ export function pageProfile() {
                 type: 'submit',
                 class: 'btn btn--primary btn--block mt-2',
                 disabled: busy || undefined,
-              }, busy ? 'Saving…' : 'Change password'),
+              }, busy ? t('action.saving') : t('profile.changePassword')),
             ),
           )
         )
@@ -482,14 +482,9 @@ export function pageAdminUsers() {
   let search = '';
   let filter = 'all';
 
-  const FILTERS = [
-    ['all', 'All'],
-    ['active', 'Active'],
-    ['disabled', 'Disabled'],
-    ['admin', 'Admins'],
-    ['nopassword', 'No password yet'],
-    ['locked', 'Locked'],
-  ];
+  // Keys, not words. The labels are looked up at render time so the chips
+  // follow a language change like everything else.
+  const FILTERS = ['all', 'active', 'disabled', 'admin', 'nopassword', 'locked'];
 
   async function load() {
     loading = true; render();
@@ -540,17 +535,17 @@ export function pageAdminUsers() {
   function userBadges(u) {
     const out = [];
     out.push(h('span', { class: ['badge', u.role === 'admin' ? 'badge--info' : ''] },
-      u.role === 'admin' ? 'Admin' : 'Inspector'));
+      t(u.role === 'admin' ? 'role.admin' : 'role.inspector')));
     if (u.status === 'disabled') {
-      out.push(h('span', { class: 'badge badge--danger' }, 'Disabled'));
+      out.push(h('span', { class: 'badge badge--danger' }, t('users.badge.disabled')));
     }
     if (u.lockedUntil) {
-      out.push(h('span', { class: 'badge badge--warning' }, 'Locked'));
+      out.push(h('span', { class: 'badge badge--warning' }, t('users.badge.locked')));
     }
     // Derived rather than stored: a third status would be a third state to
     // keep consistent, and this says the same thing.
     if (!u.hasPassword) {
-      out.push(h('span', { class: 'badge badge--warning' }, 'No password yet'));
+      out.push(h('span', { class: 'badge badge--warning' }, t('users.badge.noPassword')));
     }
     return out;
   }
@@ -563,33 +558,31 @@ export function pageAdminUsers() {
 
     const errorSlot = h('div');
     const body = h('div', null,
-      formField('Name', { autofocus: true, onInput: (e) => { name = e.target.value; } }),
-      formField('Email', {
+      formField(t('users.name'), { autofocus: true, onInput: (e) => { name = e.target.value; } }),
+      formField(t('users.email'), {
         type: 'email', inputmode: 'email',
         onInput: (e) => { email = e.target.value; },
       }),
       h('div', { class: 'form-group' },
-        h('label', { class: 'form-label' }, 'Role'),
+        h('label', { class: 'form-label' }, t('users.role')),
         h('select', {
           class: 'form-select',
           onChange: (e) => { role = e.target.value; },
         },
-          h('option', { value: 'inspector' }, 'Inspector'),
-          h('option', { value: 'admin' }, 'Admin'),
+          h('option', { value: 'inspector' }, t('role.inspector')),
+          h('option', { value: 'admin' }, t('role.admin')),
         ),
       ),
-      h('p', { class: 'text-xs text-muted' },
-        'They will receive a link to choose their own password. No password is ' +
-        'ever sent by email.'),
+      h('p', { class: 'text-xs text-muted' }, t('users.addNote')),
       errorSlot,
     );
 
-    const submitBtn = h('button', { class: 'btn btn--primary', onClick: submit }, 'Add user');
+    const submitBtn = h('button', { class: 'btn btn--primary', onClick: submit }, t('users.addTitle'));
     const modal = openModal({
-      title: 'Add user',
+      title: t('users.addTitle'),
       body,
       footer: [
-        h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, 'Cancel'),
+        h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, t('action.cancel')),
         submitBtn,
       ],
     });
@@ -597,7 +590,7 @@ export function pageAdminUsers() {
     async function submit() {
       if (busy) return;
       busy = true;
-      submitBtn.textContent = 'Adding…';
+      submitBtn.textContent = t('users.adding');
       submitBtn.setAttribute('disabled', '');
       try {
         const res = await api.createUser(name.trim(), email.trim(), role);
@@ -607,13 +600,13 @@ export function pageAdminUsers() {
         // and only one of them can fail. Saying which is what lets the admin
         // act: resend, or hand the link over another way.
         if (res.delivery && res.delivery.emailed) {
-          toastSuccess(`${res.user.name} added. Link sent to ${res.user.email}.`);
+          toastSuccess(t('users.added', { name: res.user.name, email: res.user.email }));
         } else {
           showLinkFallback(res.user, res.delivery);
         }
       } catch (e) {
         busy = false;
-        submitBtn.textContent = 'Add user';
+        submitBtn.textContent = t('users.addTitle');
         submitBtn.removeAttribute('disabled');
         mount(errorSlot, h('div', { class: 'banner banner--danger mt-3' },
           h('div', { class: 'banner__icon' }, '!'),
@@ -631,11 +624,9 @@ export function pageAdminUsers() {
     }, (delivery && delivery.url) || '');
 
     const modal = openModal({
-      title: 'Email could not be sent',
+      title: t('users.mailFailedTitle'),
       body: h('div', null,
-        h('p', { class: 'text-sm' },
-          `The account for ${user.email} exists and is ready. Only the email ` +
-          'failed, so pass this link on yourself:'),
+        h('p', { class: 'text-sm' }, t('users.mailFailedBody', { email: user.email })),
         h('div', { class: 'form-group mt-3' }, field),
         delivery && delivery.error
           ? h('p', { class: 'text-xs text-muted' }, delivery.error)
@@ -646,11 +637,11 @@ export function pageAdminUsers() {
           class: 'btn btn--secondary',
           onClick: () => {
             field.select();
-            try { document.execCommand('copy'); toastSuccess('Link copied.'); }
-            catch (_) { toastWarning('Copy it manually.'); }
+            try { document.execCommand('copy'); toastSuccess(t('users.linkCopied')); }
+            catch (_) { toastWarning(t('users.copyManually')); }
           },
-        }, 'Copy link'),
-        h('button', { class: 'btn btn--primary', onClick: () => modal.close() }, 'Done'),
+        }, t('action.copyLink')),
+        h('button', { class: 'btn btn--primary', onClick: () => modal.close() }, t('action.done')),
       ],
     });
   }
@@ -675,18 +666,21 @@ export function pageAdminUsers() {
         h('div', { class: 'badge-row mt-2' }, userBadges(u)),
 
         h('dl', { class: 'detail-list mt-4' },
-          detailRow('Last sign-in', u.lastLoginAt ? formatDateTime(u.lastLoginAt) : 'Never'),
-          detailRow('Active devices', String(u.deviceCount || 0)),
-          detailRow('Created', u.createdAt ? formatDateTime(u.createdAt) : '—'),
-          u.createdBy ? detailRow('Created by', u.createdBy) : null,
+          detailRow(t('users.detail.lastSignIn'),
+            u.lastLoginAt ? formatDateTime(u.lastLoginAt) : t('users.detail.never')),
+          detailRow(t('users.detail.activeDevices'), String(u.deviceCount || 0)),
+          detailRow(t('users.detail.created'), u.createdAt ? formatDateTime(u.createdAt) : '—'),
+          u.createdBy ? detailRow(t('users.detail.createdBy'), u.createdBy) : null,
           u.status === 'disabled' && u.disabledAt
-            ? detailRow('Disabled', `${formatDateTime(u.disabledAt)} by ${u.disabledBy || '—'}`)
+            ? detailRow(t('users.detail.disabled'), t('users.detail.disabledBy', {
+                when: formatDateTime(u.disabledAt), who: u.disabledBy || '—',
+              }))
             : null,
-          u.lockedUntil ? detailRow('Locked until', formatDateTime(u.lockedUntil)) : null,
+          u.lockedUntil ? detailRow(t('users.detail.lockedUntil'), formatDateTime(u.lockedUntil)) : null,
         ),
 
         h('div', { class: 'mt-4' },
-          h('h3', { class: 'text-sm text-muted' }, 'Actions'),
+          h('h3', { class: 'text-sm text-muted' }, t('users.detail.actions')),
 
           h('div', { class: 'stack mt-2' },
             // Status
@@ -696,25 +690,23 @@ export function pageAdminUsers() {
                     class: 'btn btn--danger btn--block',
                     disabled: (isSelf || isLastAdmin) || undefined,
                     onClick: () => confirmAnd(modal,
-                      'Disable access?',
-                      `${u.name} will be signed out of every device immediately and ` +
-                      'will not be able to sign in again.',
-                      'Disable', true,
+                      t('users.disableTitle'),
+                      t('users.disableMessage', { name: u.name }),
+                      t('users.disableConfirm'), true,
                       () => api.setUserStatus(u.userId, 'disabled'),
-                      `${u.name} no longer has access.`),
-                  }, 'Disable access'),
-                  guard(isSelf ? 'You cannot disable your own account.'
-                    : isLastAdmin ? 'This is the only active administrator.' : null))
+                      t('users.disabled', { name: u.name })),
+                  }, t('users.disable')),
+                  guard(isSelf ? t('users.disableSelf')
+                    : isLastAdmin ? t('users.onlyAdmin') : null))
               : h('button', {
                   class: 'btn btn--primary btn--block',
                   onClick: () => confirmAnd(modal,
-                    'Restore access?',
-                    `${u.name} will be able to sign in again. Their old devices stay ` +
-                    'signed out — they will sign in fresh.',
-                    'Restore', false,
+                    t('users.restoreTitle'),
+                    t('users.restoreMessage', { name: u.name }),
+                    t('users.restoreConfirm'), false,
                     () => api.setUserStatus(u.userId, 'active'),
-                    `${u.name} has access again.`),
-                }, 'Restore access'),
+                    t('users.restored', { name: u.name })),
+                }, t('users.restore')),
 
             // Role
             u.role === 'admin'
@@ -723,31 +715,29 @@ export function pageAdminUsers() {
                     class: 'btn btn--secondary btn--block',
                     disabled: (isSelf || isLastAdmin) || undefined,
                     onClick: () => confirmAnd(modal,
-                      'Remove admin rights?',
-                      `${u.name} will keep their account but lose access to account ` +
-                      'administration.',
-                      'Remove', false,
+                      t('users.revokeAdminTitle'),
+                      t('users.revokeAdminMessage', { name: u.name }),
+                      t('users.revokeAdminConfirm'), false,
                       () => api.setUserRole(u.userId, 'inspector'),
-                      `${u.name} is now an inspector.`),
-                  }, 'Remove admin rights'),
-                  guard(isSelf ? 'You cannot remove your own admin rights.'
-                    : isLastAdmin ? 'Promote someone else first.' : null))
+                      t('users.revokedAdmin', { name: u.name })),
+                  }, t('users.revokeAdmin')),
+                  guard(isSelf ? t('users.revokeAdminSelf')
+                    : isLastAdmin ? t('users.promoteSomeoneFirst') : null))
               : h('button', {
                   class: 'btn btn--secondary btn--block',
                   onClick: () => confirmAnd(modal,
-                    'Grant admin rights?',
-                    `${u.name} will be able to add and disable users, and grant admin ` +
-                    'rights to others.',
-                    'Grant', false,
+                    t('users.grantAdminTitle'),
+                    t('users.grantAdminMessage', { name: u.name }),
+                    t('users.grantAdminConfirm'), false,
                     () => api.setUserRole(u.userId, 'admin'),
-                    `${u.name} is now an admin.`),
-                }, 'Grant admin rights'),
+                    t('users.grantedAdmin', { name: u.name })),
+                }, t('users.grantAdmin')),
 
             u.lockedUntil
               ? h('button', {
                   class: 'btn btn--secondary btn--block',
-                  onClick: () => { modal.close(); act(() => api.unlockUser(u.userId), 'Account unlocked.'); },
-                }, 'Unlock account')
+                  onClick: () => { modal.close(); act(() => api.unlockUser(u.userId), t('users.unlocked')); },
+                }, t('users.unlock'))
               : null,
 
             u.status === 'active'
@@ -757,27 +747,27 @@ export function pageAdminUsers() {
                     modal.close();
                     const res = await act(() => api.sendPasswordLink(u.userId), null);
                     if (!res) return;
-                    if (res.delivery && res.delivery.emailed) toastSuccess(`Link sent to ${u.email}.`);
+                    if (res.delivery && res.delivery.emailed) toastSuccess(t('users.linkSent', { email: u.email }));
                     else showLinkFallback(u, res.delivery);
                   },
-                }, u.hasPassword ? 'Send a password reset link' : 'Resend the invitation link')
+                }, t(u.hasPassword ? 'users.sendReset' : 'users.resendInvite'))
               : null,
 
             u.deviceCount > 0
               ? h('button', {
                   class: 'btn btn--secondary btn--block',
                   onClick: () => { modal.close(); openDevices(u); },
-                }, `Devices (${u.deviceCount})`)
+                }, t('users.devicesButton', { count: u.deviceCount }))
               : null,
 
             h('button', {
               class: 'btn btn--ghost btn--block',
               onClick: () => { modal.close(); openHistory(u); },
-            }, 'History'),
+            }, t('users.history')),
           )
         )
       ),
-      footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, 'Close')],
+      footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, t('action.close'))],
     });
   }
 
@@ -791,39 +781,40 @@ export function pageAdminUsers() {
   function openDevices(u) {
     const slot = h('div', null, h('div', { class: 'boot-spinner' }));
     const modal = openModal({
-      title: `${u.name} — devices`,
+      title: t('users.devicesTitle', { name: u.name }),
       body: slot,
-      footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, 'Close')],
+      footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, t('action.close'))],
     });
 
     api.listUserDevices(u.userId).then(res => {
       const devices = res.devices || [];
       mount(slot,
         devices.length === 0
-          ? h('p', { class: 'text-muted text-sm' }, 'No devices are signed in.')
+          ? h('p', { class: 'text-muted text-sm' }, t('users.noDevices'))
           : h('ul', { class: 'list' },
               devices.map(d => h('li', { class: 'list-item' },
                 h('div', { class: 'list-item__main' },
                   h('div', { class: 'list-item__title' }, d.label),
-                  h('div', { class: 'list-item__meta' },
-                    `Last used ${formatDateTime(d.lastSeenAt)} · expires ${formatDate(d.expiresAt)}`),
+                  h('div', { class: 'list-item__meta' }, t('users.deviceMeta', {
+                    lastSeen: formatDateTime(d.lastSeenAt), expires: formatDate(d.expiresAt),
+                  })),
                 ),
                 h('button', {
                   class: 'btn btn--sm btn--danger',
                   onClick: async () => {
                     modal.close();
-                    await act(() => api.revokeDevice(d.deviceId), 'Device signed out.');
+                    await act(() => api.revokeDevice(d.deviceId), t('users.deviceSignedOut'));
                   },
-                }, 'Sign out'),
+                }, t('users.signOutDevice')),
               ))),
         devices.length > 1
           ? h('button', {
               class: 'btn btn--danger btn--block mt-4',
               onClick: async () => {
                 modal.close();
-                await act(() => api.revokeAllDevices(u.userId), 'All devices signed out.');
+                await act(() => api.revokeAllDevices(u.userId), t('users.allSignedOut'));
               },
-            }, 'Sign out all devices')
+            }, t('users.signOutAll'))
           : null,
       );
     }).catch(e => {
@@ -834,16 +825,16 @@ export function pageAdminUsers() {
   function openHistory(u) {
     const slot = h('div', null, h('div', { class: 'boot-spinner' }));
     const modal = openModal({
-      title: `${u.name} — history`,
+      title: t('users.historyTitle', { name: u.name }),
       body: slot,
-      footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, 'Close')],
+      footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, t('action.close'))],
     });
 
     api.getAuthLog(u.userId, 100).then(res => {
       const events = res.events || [];
       mount(slot,
         events.length === 0
-          ? h('p', { class: 'text-muted text-sm' }, 'Nothing recorded yet.')
+          ? h('p', { class: 'text-muted text-sm' }, t('users.noHistory'))
           : h('ul', { class: 'list' },
               events.map(e => h('li', { class: 'list-item' },
                 h('div', { class: 'list-item__main' },
@@ -861,15 +852,15 @@ export function pageAdminUsers() {
     mount(root(),
       h('div', { class: 'app-layout' },
         appHeader({
-          title: 'Users',
-          subtitle: `${activeAdmins} active admin${activeAdmins === 1 ? '' : 's'}`,
+          title: t('users.title'),
+          subtitle: tn('users.activeAdmins', activeAdmins),
           onBack: () => navigate('/admin'),
           actions: [
             h('button', {
               class: 'btn btn--sm btn--ghost',
               style: { color: 'white' },
               onClick: openAddUser,
-            }, '+ Add'),
+            }, t('users.add')),
           ],
         }),
         h('main', { class: 'app-body' },
@@ -878,15 +869,15 @@ export function pageAdminUsers() {
               h('input', {
                 class: 'form-input',
                 type: 'search',
-                placeholder: 'Search name or email',
+                placeholder: t('users.search'),
                 value: search,
                 onInput: (e) => { search = e.target.value; renderList(); },
               }),
               h('div', { class: 'chip-row mt-2' },
-                FILTERS.map(([key, label]) => h('button', {
+                FILTERS.map(key => h('button', {
                   class: ['chip', filter === key ? 'chip--active' : ''],
                   onClick: () => { filter = key; render(); },
-                }, label))),
+                }, t('users.filter.' + key)))),
             ),
             listSlot(list),
           )
@@ -919,8 +910,8 @@ export function pageAdminUsers() {
     if (list.length === 0) {
       mount(slot, h('div', { class: 'empty-state' },
         h('div', { class: 'empty-state__icon' }, '○'),
-        h('h2', { class: 'empty-state__title' }, 'No users match'),
-        h('p', { class: 'empty-state__description' }, 'Try a different search or filter.')));
+        h('h2', { class: 'empty-state__title' }, t('users.noneTitle')),
+        h('p', { class: 'empty-state__description' }, t('users.noneBody'))));
       return;
     }
     mount(slot, h('ul', { class: 'list' },
@@ -933,8 +924,10 @@ export function pageAdminUsers() {
           h('div', { class: 'list-item__meta' }, u.email),
           h('div', { class: 'badge-row mt-1' }, userBadges(u)),
           h('div', { class: 'list-item__meta mt-1' },
-            u.lastLoginAt ? `Last sign-in ${formatDateTime(u.lastLoginAt)}` : 'Never signed in',
-            u.deviceCount ? ` · ${u.deviceCount} device${u.deviceCount === 1 ? '' : 's'}` : ''),
+            u.lastLoginAt
+              ? t('users.lastSignIn', { when: formatDateTime(u.lastLoginAt) })
+              : t('users.neverSignedIn'),
+            u.deviceCount ? ' · ' + tn('users.devices', u.deviceCount) : ''),
         ),
         h('span', { class: 'list-item__chevron' }, '›'),
       ))));
@@ -951,29 +944,21 @@ function detailRow(label, value) {
   );
 }
 
-const EVENT_LABELS = {
-  login_succeeded: 'Signed in',
-  login_failed: 'Failed sign-in',
-  account_locked: 'Account locked',
-  account_unlocked: 'Account unlocked',
-  password_set: 'Password set',
-  password_changed: 'Password changed',
-  password_reset: 'Password reset',
-  password_reset_sent: 'Reset link sent',
-  user_created: 'Account created',
-  user_disabled: 'Access disabled',
-  user_enabled: 'Access restored',
-  role_granted: 'Admin rights granted',
-  role_revoked: 'Admin rights removed',
-  // Kept for rows already in the sheet. Signing in no longer writes it — it
-  // fired on exactly the same occasions as login_succeeded, which now carries
-  // the device label itself.
-  device_registered: 'Device registered',
-  device_revoked: 'Device signed out',
-};
-
+/**
+ * The sheet stores an event type; the screen shows a sentence.
+ *
+ * event.device_registered is kept although signing in no longer writes it — it
+ * fired on exactly the same occasions as login_succeeded, which now carries the
+ * device label itself — because rows already in the sheet still say it.
+ *
+ * An unknown type is shown as it was stored rather than as a missing key: this
+ * log is read when something has gone wrong, and a raw event name is worth more
+ * then than a blank.
+ */
 function humanEvent(type) {
-  return EVENT_LABELS[type] || type;
+  const key = 'event.' + type;
+  const label = t(key);
+  return label === key ? type : label;
 }
 
 // ============================================================
@@ -1072,7 +1057,7 @@ export function pageAdminList() {
     } catch (e) {
       // A failed refresh must not wipe a list that is already readable.
       if (inspections.length === 0) error = e.message;
-      else toastWarning('Could not refresh the list.');
+      else toastWarning(t('list.refreshFailed'));
     } finally {
       loading = false;
       render();
@@ -1083,43 +1068,49 @@ export function pageAdminList() {
     mount(root(),
       h('div', { class: 'app-layout' },
         appHeader({
-          title: 'Inspections',
+          title: t('list.title'),
           subtitle: (getState().user && getState().user.name) || '',
+          // The one header with no room. Five actions already fill the bar on a
+          // phone, and measured on a 390 px screen the switch took another 74 —
+          // enough to clip the title to "Pr…". Everyone who sees this screen is
+          // signed in and so has a profile, where the switch is spelled out in
+          // full; the tenant screens, which have no profile, keep it.
+          lang: false,
           actions: [
             h('button', {
               class: 'btn btn--sm btn--ghost',
               style: { color: 'white' },
               onClick: () => navigate('/admin/new'),
-            }, '+ New'),
+            }, t('list.new')),
             h('button', {
               class: 'btn btn--sm btn--ghost',
               style: { color: 'white' },
-              title: 'Refresh',
+              title: t('list.refresh'),
               onClick: () => { invalidateCachedList(); load(); },
             }, '⟳'),
             isAdmin()
               ? h('button', {
                   class: 'btn btn--sm btn--ghost',
                   style: { color: 'white' },
-                  title: 'Users',
+                  title: t('list.users'),
                   onClick: () => navigate('/admin/users'),
                 }, '👥')
               : null,
             h('button', {
               class: 'btn btn--sm btn--ghost',
               style: { color: 'white' },
-              title: 'My account',
+              title: t('list.account'),
               onClick: () => navigate('/profile'),
             }, '⚙'),
             h('button', {
               class: 'btn btn--sm btn--ghost',
               style: { color: 'white' },
-              title: 'Sign out',
+              title: t('list.signOut'),
               onClick: async () => {
                 const ok = await confirm({
-                  title: 'Sign out?',
-                  message: 'This device will be signed out. You will need your email and password to sign back in.',
-                  confirmLabel: 'Sign out',
+                  title: t('list.signOutTitle'),
+                  message: t('list.signOutMessage'),
+                  confirmLabel: t('list.signOut'),
                 });
                 if (!ok) return;
                 await authSignOut();
@@ -1138,15 +1129,14 @@ export function pageAdminList() {
                 : inspections.length === 0
                   ? h('div', { class: 'empty-state' },
                       h('div', { class: 'empty-state__icon' }, '○'),
-                      h('h2', { class: 'empty-state__title' }, 'No inspections yet'),
-                      h('p', { class: 'empty-state__description' }, 'Create your first inspection to get started.'),
-                      h('button', { class: 'btn btn--primary mt-4', onClick: () => navigate('/admin/new') }, '+ New Inspection'))
+                      h('h2', { class: 'empty-state__title' }, t('list.emptyTitle')),
+                      h('p', { class: 'empty-state__description' }, t('list.emptyBody')),
+                      h('button', { class: 'btn btn--primary mt-4', onClick: () => navigate('/admin/new') }, t('list.emptyAction')))
                   : visibleRows().length === 0
                   ? h('div', { class: 'empty-state' },
                       h('div', { class: 'empty-state__icon' }, '○'),
-                      h('h2', { class: 'empty-state__title' }, 'Nothing matches'),
-                      h('p', { class: 'empty-state__description' },
-                        'No inspection in the list matches that search.'))
+                      h('h2', { class: 'empty-state__title' }, t('list.noMatchTitle')),
+                      h('p', { class: 'empty-state__description' }, t('list.noMatchBody')))
                   : h('ul', { class: 'list' },
                       visibleRows().map(i => h('li', {
                         class: 'list-item',
@@ -1161,12 +1151,12 @@ export function pageAdminList() {
                         onClick: () => navigate('/admin/inspection/' + i.inspectionId),
                       },
                         h('div', { class: 'list-item__row' },
-                          h('div', { class: 'list-item__title' }, i.propertyAddress || '(no address)'),
+                          h('div', { class: 'list-item__title' }, i.propertyAddress || t('list.noAddress')),
                           badge(i.status),
                         ),
                         h('div', { class: 'list-item__meta' },
                           inspectionTypeLabel(i.inspectionType), ' · ',
-                          i.tenantName || '(no tenant)', ' · ',
+                          i.tenantName || t('list.noTenant'), ' · ',
                           formatDate(i.updatedAt),
                         ),
                         // Shown to admins only. An inspector's list contains
@@ -1174,7 +1164,7 @@ export function pageAdminList() {
                         // name on every row says nothing.
                         isAdmin() && i.assignedTo
                           ? h('div', { class: 'list-item__meta' },
-                              'Assigned to ', i.assignedToName || i.assignedTo)
+                              t('list.assignedTo'), i.assignedToName || i.assignedTo)
                           : null,
                         h('div', { class: 'list-item__meta text-mono' }, i.inspectionId),
                       ))
@@ -1203,7 +1193,7 @@ export function pageAdminList() {
       h('input', {
         type: 'search',
         class: 'form-input',
-        placeholder: 'Search by address, tenant, or ID',
+        placeholder: t('list.search'),
         value: searchText,
         // Filters the list already in hand rather than asking the server.
         //
@@ -1284,15 +1274,15 @@ export function pageAdminNew() {
 
   async function submit() {
     if (!form.inspectionType || !form.schemaId) {
-      toastWarning('Pick an inspection type.');
+      toastWarning(t('new.needType'));
       return;
     }
     if (!form.property.addressLine1) {
-      toastWarning('Address required.');
+      toastWarning(t('new.needAddress'));
       return;
     }
     if (!form.parties.landlord.name || !form.parties.tenant.name) {
-      toastWarning('Both landlord and tenant names are required.');
+      toastWarning(t('new.needParties'));
       return;
     }
     submitting = true; render();
@@ -1305,7 +1295,7 @@ export function pageAdminNew() {
       // never had one, and adding one against an older deployment would make
       // creating slower rather than faster.
       if (res.state) setInspectionData(res.state);
-      toastSuccess('Inspection created.');
+      toastSuccess(t('new.created'));
       // Show the tenant URL in a modal
       showTenantLinkModal(res.inspectionId, res.tenantUrl);
     } catch (e) {
@@ -1325,21 +1315,21 @@ export function pageAdminNew() {
       onClick: (e) => e.target.select(),
     });
     const modal = openModal({
-      title: 'Inspection created',
+      title: t('new.createdTitle'),
       body: h('div', null,
-        h('p', null, h('strong', null, 'ID: '), h('span', { class: 'text-mono' }, inspectionId)),
-        h('p', { class: 'mt-3' }, 'Tenant link (share via email or SMS):'),
+        h('p', null, h('strong', null, t('new.idLabel')), h('span', { class: 'text-mono' }, inspectionId)),
+        h('p', { class: 'mt-3' }, t('new.tenantLink')),
         linkInput,
-        h('p', { class: 'text-xs text-muted mt-3' }, 'This link is private. The tenant can use it without a Google account. Default expiry: 7 days.'),
+        h('p', { class: 'text-xs text-muted mt-3' }, t('new.tenantLinkNote')),
       ),
       footer: [
         h('button', { class: 'btn btn--secondary', onClick: () => {
-          navigator.clipboard.writeText(tenantUrl).then(() => toastSuccess('Copied'));
-        }}, 'Copy link'),
+          navigator.clipboard.writeText(tenantUrl).then(() => toastSuccess(t('new.copied')));
+        }}, t('action.copyLink')),
         h('button', { class: 'btn btn--primary', onClick: () => {
           modal.close();
           navigate('/admin/inspection/' + inspectionId);
-        }}, 'Open inspection'),
+        }}, t('new.open')),
       ],
     });
   }
@@ -1351,14 +1341,14 @@ export function pageAdminNew() {
   function render() {
     mount(root(),
       h('div', { class: 'app-layout' },
-        appHeader({ title: 'New Inspection', onBack: () => back() }),
+        appHeader({ title: t('new.title'), onBack: () => back() }),
         h('main', { class: 'app-body app-body--has-bottom-bar' },
           h('div', { class: 'page' },
             loading
               ? h('div', { class: 'boot-spinner' })
               : h('div', { class: 'card' },
                   h('div', { class: 'form-group' },
-                    h('label', { class: 'form-label' }, 'Inspection type ', h('span', { class: 'form-label__required' }, '*')),
+                    h('label', { class: 'form-label' }, t('new.type') + ' ', h('span', { class: 'form-label__required' }, '*')),
                     h('select', {
                       class: 'form-select',
                       onChange: (e) => {
@@ -1367,41 +1357,41 @@ export function pageAdminNew() {
                         form.inspectionType = sch ? sch.inspectionType : '';
                       },
                     },
-                      h('option', { value: '' }, '— Choose —'),
-                      schemas.map(s => h('option', { value: s.schemaId }, s.title)),
+                      h('option', { value: '' }, t('input.choose')),
+                      schemas.map(s => h('option', { value: s.schemaId }, tc(s.title))),
                     ),
                   ),
                   h('hr', { style: { border: 'none', borderTop: '1px solid var(--color-border)', margin: '1rem 0' }}),
-                  h('h3', { class: 'page__section-title' }, 'Property'),
+                  h('h3', { class: 'page__section-title' }, t('new.property')),
                   h('div', { class: 'form-group' },
-                    h('label', { class: 'form-label' }, 'Address ', h('span', { class: 'form-label__required' }, '*')),
-                    h('input', { type: 'text', class: 'form-input', placeholder: 'Street and number', value: form.property.addressLine1,
+                    h('label', { class: 'form-label' }, t('new.address') + ' ', h('span', { class: 'form-label__required' }, '*')),
+                    h('input', { type: 'text', class: 'form-input', placeholder: t('new.addressPlaceholder'), value: form.property.addressLine1,
                       onInput: (e) => form.property.addressLine1 = e.target.value }),
                   ),
                   h('div', { class: 'form-inline' },
                     h('div', { class: 'form-group' },
-                      h('label', { class: 'form-label' }, 'City'),
+                      h('label', { class: 'form-label' }, t('new.city')),
                       h('input', { type: 'text', class: 'form-input', value: form.property.city,
                         onInput: (e) => form.property.city = e.target.value }),
                     ),
                     h('div', { class: 'form-group' },
-                      h('label', { class: 'form-label' }, 'Postal code'),
+                      h('label', { class: 'form-label' }, t('new.postalCode')),
                       h('input', { type: 'text', class: 'form-input', value: form.property.postalCode,
                         onInput: (e) => form.property.postalCode = e.target.value }),
                     ),
                   ),
                   h('div', { class: 'form-group' },
-                    h('label', { class: 'form-label' }, 'Unit / Apartment number'),
+                    h('label', { class: 'form-label' }, t('new.unit')),
                     h('input', { type: 'text', class: 'form-input', value: form.property.unitNumber,
                       onInput: (e) => form.property.unitNumber = e.target.value }),
                   ),
 
                   h('hr', { style: { border: 'none', borderTop: '1px solid var(--color-border)', margin: '1rem 0' }}),
-                  h('h3', { class: 'page__section-title' }, 'Landlord'),
+                  h('h3', { class: 'page__section-title' }, t('new.landlord')),
                   partyFields(form.parties.landlord),
 
                   h('hr', { style: { border: 'none', borderTop: '1px solid var(--color-border)', margin: '1rem 0' }}),
-                  h('h3', { class: 'page__section-title' }, 'Tenant'),
+                  h('h3', { class: 'page__section-title' }, t('new.tenant')),
                   partyFields(form.parties.tenant),
 
                   h('hr', { style: { border: 'none', borderTop: '1px solid var(--color-border)', margin: '1rem 0' }}),
@@ -1412,21 +1402,20 @@ export function pageAdminNew() {
                   // have.
                   isAdmin()
                     ? h('div', { class: 'form-group' },
-                        h('label', { class: 'form-label' }, 'Assign to'),
+                        h('label', { class: 'form-label' }, t('new.assignTo')),
                         h('select', {
                           class: 'form-select',
                           onChange: (e) => { form.assignedTo = e.target.value; },
                         },
-                          h('option', { value: '' }, 'Me'),
+                          h('option', { value: '' }, t('new.assignMe')),
                           assignableUsers.map(u => h('option', { value: u.email }, u.name)),
                         ),
-                        h('p', { class: 'form-hint text-xs text-muted' },
-                          'Who will carry out this inspection. Can be changed later.'),
+                        h('p', { class: 'form-hint text-xs text-muted' }, t('new.assignHint')),
                       )
                     : null,
 
                   h('div', { class: 'form-group' },
-                    h('label', { class: 'form-label' }, 'Internal notes (optional)'),
+                    h('label', { class: 'form-label' }, t('new.notes')),
                     h('textarea', {
                       class: 'form-textarea',
                       onInput: (e) => form.notes = e.target.value,
@@ -1436,12 +1425,12 @@ export function pageAdminNew() {
           ),
         ),
         bottomBar(
-          h('button', { class: 'btn btn--secondary', onClick: () => back() }, 'Cancel'),
+          h('button', { class: 'btn btn--secondary', onClick: () => back() }, t('action.cancel')),
           h('button', {
             class: 'btn btn--primary bottom-bar__primary',
             disabled: submitting || undefined,
             onClick: submit,
-          }, submitting ? 'Creating…' : 'Create inspection'),
+          }, submitting ? t('new.submitting') : t('new.submit')),
         ),
       )
     );
@@ -1450,18 +1439,18 @@ export function pageAdminNew() {
   function partyFields(party) {
     return h('div', null,
       h('div', { class: 'form-group' },
-        h('label', { class: 'form-label' }, 'Name ', h('span', { class: 'form-label__required' }, '*')),
+        h('label', { class: 'form-label' }, t('new.name') + ' ', h('span', { class: 'form-label__required' }, '*')),
         h('input', { type: 'text', class: 'form-input', value: party.name,
           onInput: (e) => party.name = e.target.value }),
       ),
       h('div', { class: 'form-inline' },
         h('div', { class: 'form-group' },
-          h('label', { class: 'form-label' }, 'Email'),
+          h('label', { class: 'form-label' }, t('new.email')),
           h('input', { type: 'email', class: 'form-input', value: party.email,
             onInput: (e) => party.email = e.target.value }),
         ),
         h('div', { class: 'form-group' },
-          h('label', { class: 'form-label' }, 'Phone'),
+          h('label', { class: 'form-label' }, t('new.phone')),
           h('input', { type: 'tel', class: 'form-input', value: party.phone,
             onInput: (e) => party.phone = e.target.value }),
         ),
@@ -1488,12 +1477,12 @@ export async function pageInspectionHome({ params }) {
   // saving, locking, unlocking, signing and finalising all call
   // setInspectionData with the server's reply.
   if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading inspection…');
+    showSpinner(t('inspection.loading'));
     try {
       const data = await api.getInspection(inspectionId);
       setInspectionData(data);
     } catch (e) {
-      return showError('Could not load inspection', e.message);
+      return showError(t('inspection.loadFailed'), e.message);
     }
   }
 
@@ -1520,12 +1509,12 @@ export async function pageInspectionHome({ params }) {
         onClick: () => navigate(`/inspection/${inspectionId}/section/${section.id}`),
       },
         h('span', { class: ['section-list__indicator', indicatorClass] }),
-        h('span', { class: 'section-list__title' }, section.title),
+        h('span', { class: 'section-list__title' }, tc(section.title)),
         unsent.has(section.id)
           ? h('span', {
               class: 'badge badge--warning',
-              title: 'Typed on this device but not yet saved. Open the section to send it.',
-            }, 'Unsaved')
+              title: t('inspection.unsavedHint'),
+            }, t('inspection.unsaved'))
           : null,
         h('span', { class: 'section-list__progress' },
           sp.totalRequired > 0 ? `${sp.completedRequired}/${sp.totalRequired}` : `${sp.completedVisible}/${sp.totalVisible}`),
@@ -1544,24 +1533,26 @@ export async function pageInspectionHome({ params }) {
         disabled: !progress.isReadyForLock || undefined,
         onClick: () => navigate(`/inspection/${inspectionId}/review`),
       }, progress.isReadyForLock
-          ? 'Review & lock'
-          : `Complete ${progress.totalRequired - progress.completedRequired} more required`);
+          ? t('inspection.reviewLock')
+          : t('inspection.completeMore', {
+              count: progress.totalRequired - progress.completedRequired,
+            }));
     } else if (canSign) {
       actionButton = h('button', {
         class: 'btn btn--primary bottom-bar__primary',
         onClick: () => navigate(`/inspection/${inspectionId}/sign`),
-      }, 'Go to signing');
+      }, t('inspection.goSign'));
     } else if (insp.status === 'signed') {
       actionButton = h('button', {
         class: 'btn btn--primary bottom-bar__primary',
         onClick: () => navigate(`/inspection/${inspectionId}/success`),
-      }, 'View final report');
+      }, t('inspection.viewReport'));
     }
 
     mount(root(),
       h('div', { class: 'app-layout' },
         appHeader({
-          title: insp.propertyAddress || 'Inspection',
+          title: insp.propertyAddress || t('inspection.fallbackTitle'),
           subtitle: `${inspectionTypeLabel(insp.inspectionType)} · ${insp.inspectionId}`,
           onBack: isStaff ? () => navigate('/admin') : null,
         }),
@@ -1570,7 +1561,8 @@ export async function pageInspectionHome({ params }) {
             h('div', { class: 'flex justify-between items-center' },
               badge(insp.status),
               h('span', { class: 'text-sm text-muted' },
-                progress.completedRequired, '/', progress.totalRequired, ' required'),
+                progress.completedRequired, '/', progress.totalRequired,
+                t('inspection.requiredCount')),
             ),
             progressBar(progress.completedRequired, progress.totalRequired || 1),
 
@@ -1578,19 +1570,19 @@ export async function pageInspectionHome({ params }) {
               ? h('div', { class: 'banner banner--info' },
                   h('div', { class: 'banner__icon' }, 'i'),
                   h('div', { class: 'banner__body' },
-                    h('div', { class: 'banner__title' }, 'Awaiting signatures'),
-                    'The inspection is locked for review. Editing is disabled.'))
+                    h('div', { class: 'banner__title' }, t('inspection.awaitingTitle')),
+                    t('inspection.awaitingBody')))
               : null,
 
             insp.status === 'signed'
               ? h('div', { class: 'banner banner--success' },
                   h('div', { class: 'banner__icon' }, '✓'),
                   h('div', { class: 'banner__body' },
-                    h('div', { class: 'banner__title' }, 'Signed'),
-                    'All signatures collected.'))
+                    h('div', { class: 'banner__title' }, t('inspection.signedTitle')),
+                    t('inspection.signedBody')))
               : null,
 
-            h('h2', { class: 'page__section-title' }, 'Sections'),
+            h('h2', { class: 'page__section-title' }, t('inspection.sections')),
             h('div', { class: 'section-list' }, sectionRows),
           )
         ),
@@ -1612,19 +1604,19 @@ export async function pageInspectionSection({ params }) {
 
   // Ensure inspection is loaded (after refresh on this URL)
   if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading…');
+    showSpinner(t('boot.loading'));
     try {
       const data = await api.getInspection(inspectionId);
       setInspectionData(data);
     } catch (e) {
-      return showError('Could not load inspection', e.message);
+      return showError(t('inspection.loadFailed'), e.message);
     }
   }
 
   const state = getState();
   const section = (state.schema.sections || []).find(s => s.id === sectionId);
   if (!section) {
-    return showError('Section not found', `No section with id '${sectionId}'.`);
+    return showError(t('section.notFound'), t('section.notFoundBody', { id: sectionId }));
   }
 
   // Pending changes buffer (drained by autosave)
@@ -1706,11 +1698,12 @@ export async function pageInspectionSection({ params }) {
           // overwrite their work, which is the thing the revision exists to
           // stop — so the person is told, and the draft stays on the device so
           // nothing they typed is lost either way.
-          toastError('This section was changed elsewhere. Reopen it to see the '
-            + 'current answers; what you typed is still saved on this device.');
+          toastError(t('section.conflict'));
           return;
         }
-        toastError('Save failed: ' + (e.code || 'unknown') + ' — ' + (e.message || ''));
+        toastError(t('section.saveFailed', {
+          code: e.code || 'unknown', message: e.message || '',
+        }));
       }));
   }
 
@@ -1819,8 +1812,11 @@ export async function pageInspectionSection({ params }) {
     mount(root(),
       h('div', { class: 'app-layout' },
         appHeader({
-          title: section.title,
+          title: tc(section.title),
           subtitle: insp.propertyAddress,
+          // The save indicator owns the actions slot here; the language switch
+          // is one screen away, on the section list this came from.
+          lang: false,
           // Started, not waited for. What was typed is already in local state
           // and on the device, and a failure reports itself wherever the person
           // has got to — so the five seconds this used to spend were spent
@@ -1834,7 +1830,7 @@ export async function pageInspectionSection({ params }) {
         }),
         h('main', { class: 'app-body app-body--has-bottom-bar' },
           h('div', { class: 'page' },
-            section.description ? h('p', { class: 'text-muted text-sm' }, section.description) : null,
+            section.description ? h('p', { class: 'text-muted text-sm' }, tc(section.description)) : null,
             progressContainer,
             cardsContainer,
           ),
@@ -1846,7 +1842,7 @@ export async function pageInspectionSection({ params }) {
               flushSave();
               navigate('/inspection/' + inspectionId);
             },
-          }, 'Sections'),
+          }, t('section.sections')),
           nextSection
             ? h('button', {
                 class: 'btn btn--primary bottom-bar__primary',
@@ -1854,14 +1850,14 @@ export async function pageInspectionSection({ params }) {
                   flushSave();
                   navigate(`/inspection/${inspectionId}/section/${nextSection.id}`);
                 },
-              }, 'Next: ' + nextSection.title + ' →')
+              }, t('section.next', { title: tc(nextSection.title) }))
             : h('button', {
                 class: 'btn btn--primary bottom-bar__primary',
                 onClick: () => {
                   flushSave();
                   navigate('/inspection/' + inspectionId);
                 },
-              }, 'Done with section'),
+              }, t('section.done')),
         ),
       )
     );
@@ -1873,9 +1869,7 @@ export async function pageInspectionSection({ params }) {
   // someone looking at answers with no way to tell whether they are safe —
   // which is the state this whole mechanism exists to end.
   if (restoredIds.length > 0) {
-    toastWarning(
-      `${restoredIds.length} answer${restoredIds.length === 1 ? '' : 's'} ` +
-      'from this device had not been saved. Restored — sending now.');
+    toastWarning(tn('section.restored', restoredIds.length));
     flushSave();
   }
 
@@ -1917,12 +1911,12 @@ export async function pageReview({ params }) {
   const inspectionId = params.id;
 
   if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading…');
+    showSpinner(t('boot.loading'));
     try {
       const data = await api.getInspection(inspectionId);
       setInspectionData(data);
     } catch (e) {
-      return showError('Could not load inspection', e.message);
+      return showError(t('inspection.loadFailed'), e.message);
     }
   }
 
@@ -1950,15 +1944,15 @@ export async function pageReview({ params }) {
   function withSectionTitles(items) {
     return items.map(m => {
       const section = (schema.sections || []).find(s => s.id === m.sectionId);
-      return Object.assign({ sectionTitle: (section && section.title) || m.sectionId }, m);
+      return Object.assign({ sectionTitle: (section && tc(section.title)) || m.sectionId }, m);
     });
   }
 
   async function doLock() {
     const ok = await confirm({
-      title: 'Lock inspection?',
-      message: 'Once locked, no further edits are possible. Both parties will sign the report. You can unlock later if corrections are needed (which invalidates any signatures).',
-      confirmLabel: 'Lock for signing',
+      title: t('review.lockTitle'),
+      message: t('review.lockMessage'),
+      confirmLabel: t('review.lockConfirm'),
     });
     if (!ok) return;
     locking = true; render();
@@ -1972,7 +1966,7 @@ export async function pageReview({ params }) {
       await savesSettled();
       await applyMutationState(await api.lockInspection(inspectionId), inspectionId);
       serverMissing = null;
-      toastSuccess('Inspection locked. Ready for signatures.');
+      toastSuccess(t('review.locked'));
       navigate(`/inspection/${inspectionId}/sign`);
     } catch (e) {
       if (e.code === 'VALIDATION_FAILED' && e.details && e.details.missingItems) {
@@ -1981,8 +1975,8 @@ export async function pageReview({ params }) {
         // everything is complete leaves someone with nowhere to go.
         const first = serverMissing[0];
         toastError(serverMissing.length === 1
-          ? `Still missing: ${first.sectionTitle} — ${first.label}`
-          : `${serverMissing.length} required items missing, listed above.`);
+          ? t('review.stillMissingOne', { section: first.sectionTitle, label: tc(first.label) })
+          : t('review.stillMissingMany', { count: serverMissing.length }));
         // The lock was refused, so nothing came back to redraw from — this one
         // really does have to ask.
         setInspectionData(await api.getInspection(inspectionId));
@@ -2006,48 +2000,50 @@ export async function pageReview({ params }) {
 
     mount(root(),
       h('div', { class: 'app-layout' },
-        appHeader({ title: 'Review', onBack: () => navigate('/inspection/' + inspectionId) }),
+        appHeader({ title: t('review.title'), onBack: () => navigate('/inspection/' + inspectionId) }),
         h('main', { class: 'app-body app-body--has-bottom-bar' },
           h('div', { class: 'page' },
             h('div', { class: 'card' },
               h('h2', { class: 'card__title' }, insp.propertyAddress),
               h('p', { class: 'card__meta' }, inspectionTypeLabel(insp.inspectionType), ' · ', insp.inspectionId),
               h('p', { class: 'card__meta mt-2' },
-                h('strong', null, 'Tenant: '), insp.tenantName, ' · ',
-                h('strong', null, 'Landlord: '), insp.landlordName,
+                h('strong', null, t('review.tenant')), insp.tenantName, ' · ',
+                h('strong', null, t('review.landlord')), insp.landlordName,
               ),
             ),
 
-            h('h3', { class: 'page__section-title' }, 'Required items'),
+            h('h3', { class: 'page__section-title' }, t('review.requiredItems')),
             missing.length > 0
               ? h('div', { class: 'banner banner--warning' },
                   h('div', { class: 'banner__icon' }, '!'),
                   h('div', { class: 'banner__body' },
-                    h('div', { class: 'banner__title' }, `${missing.length} item${missing.length > 1 ? 's' : ''} still missing`),
+                    h('div', { class: 'banner__title' }, tn('review.missing', missing.length)),
                     h('ul', { style: { margin: '0.5rem 0 0 1rem' } },
                       missing.map(m => h('li', null,
                         h('a', {
                           href: '#',
                           onClick: (e) => { e.preventDefault(); navigate(`/inspection/${inspectionId}/section/${m.sectionId}`); },
-                        }, m.sectionTitle), ' — ', m.label,
-                        m.reason === 'insufficient_attachments' ? ' (photos required)' : '',
+                        }, tc(m.sectionTitle)), ' — ', tc(m.label),
+                        m.reason === 'insufficient_attachments' ? t('review.photosRequired') : '',
                       )),
                     ),
                   ),
                 )
               : h('div', { class: 'banner banner--success' },
                   h('div', { class: 'banner__icon' }, '✓'),
-                  h('div', { class: 'banner__body' }, 'All required items completed.')),
+                  h('div', { class: 'banner__body' }, t('review.allComplete'))),
 
-            h('h3', { class: 'page__section-title' }, 'Section summary'),
+            h('h3', { class: 'page__section-title' }, t('review.sectionSummary')),
             h('div', { class: 'list' },
               (schema.sections || []).map(s => {
                 const sp = sectionProgress(s, state.answers);
                 return h('div', { class: 'list-item', onClick: () => navigate(`/inspection/${inspectionId}/section/${s.id}`) },
                   h('div', { class: 'list-item__row' },
-                    h('span', { class: 'list-item__title' }, s.title),
+                    h('span', { class: 'list-item__title' }, tc(s.title)),
                     h('span', { class: 'list-item__meta' },
-                      sp.totalRequired > 0 ? `${sp.completedRequired}/${sp.totalRequired} required` : `${sp.completedVisible}/${sp.totalVisible} filled`),
+                      sp.totalRequired > 0
+                        ? t('review.sectionRequired', { done: sp.completedRequired, total: sp.totalRequired })
+                        : t('review.sectionFilled', { done: sp.completedVisible, total: sp.totalVisible })),
                   ),
                 );
               }),
@@ -2055,12 +2051,12 @@ export async function pageReview({ params }) {
           ),
         ),
         bottomBar(
-          h('button', { class: 'btn btn--secondary', onClick: () => navigate('/inspection/' + inspectionId) }, 'Back'),
+          h('button', { class: 'btn btn--secondary', onClick: () => navigate('/inspection/' + inspectionId) }, t('action.back')),
           h('button', {
             class: 'btn btn--primary bottom-bar__primary',
             disabled: missing.length > 0 || locking || undefined,
             onClick: doLock,
-          }, locking ? 'Locking…' : 'Lock & request signatures'),
+          }, locking ? t('review.locking') : t('review.lock')),
         ),
       )
     );
@@ -2076,12 +2072,12 @@ export async function pageSign({ params }) {
   const inspectionId = params.id;
 
   if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading…');
+    showSpinner(t('boot.loading'));
     try {
       const data = await api.getInspection(inspectionId);
       setInspectionData(data);
     } catch (e) {
-      return showError('Could not load inspection', e.message);
+      return showError(t('inspection.loadFailed'), e.message);
     }
   }
 
@@ -2098,7 +2094,7 @@ export async function pageSign({ params }) {
   } else if (isTenant) {
     availableRoles = ['tenant'];
   } else {
-    return showError('Cannot sign', 'No valid signing role.');
+    return showError(t('sign.cannotTitle'), t('sign.cannotBody'));
   }
 
   const validSignatures = (state.signatures || []).filter(s => s.valid === true);
@@ -2114,13 +2110,13 @@ export async function pageSign({ params }) {
     // All this user's roles already signed
     return mount(root(),
       h('div', { class: 'app-layout' },
-        appHeader({ title: 'Signatures', onBack: () => navigate('/inspection/' + inspectionId) }),
+        appHeader({ title: t('sign.signaturesTitle'), onBack: () => navigate('/inspection/' + inspectionId) }),
         h('main', { class: 'app-body' },
           h('div', { class: 'page' },
             h('div', { class: 'banner banner--success' },
               h('div', { class: 'banner__icon' }, '✓'),
-              h('div', { class: 'banner__body' }, 'You have signed. Awaiting other party.')),
-            isStaff ? h('button', { class: 'btn btn--primary mt-4', onClick: () => navigate('/admin/inspection/' + inspectionId) }, 'Back to admin') : null,
+              h('div', { class: 'banner__body' }, t('sign.alreadySigned'))),
+            isStaff ? h('button', { class: 'btn btn--primary mt-4', onClick: () => navigate('/admin/inspection/' + inspectionId) }, t('sign.backToAdmin')) : null,
           )
         )
       )
@@ -2143,7 +2139,7 @@ export async function pageSign({ params }) {
   function buildRoleSection() {
     if (availableRoles.length > 1) {
       return h('div', { class: 'form-group' },
-        h('label', { class: 'form-label' }, 'Signing as'),
+        h('label', { class: 'form-label' }, t('sign.signingAs')),
         h('div', { class: 'form-options' },
           remainingRoles.map(r => h('div', {
             class: ['form-check', 'form-check--radio', currentRole === r ? 'form-check--checked' : null],
@@ -2158,7 +2154,8 @@ export async function pageSign({ params }) {
             },
           },
             h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
-            h('span', { class: 'form-check__label' }, r === 'tenant' ? 'Tenant' : r === 'landlord' ? 'Landlord' : r),
+            h('span', { class: 'form-check__label' },
+              r === 'tenant' ? t('role.tenant') : r === 'landlord' ? t('role.landlord') : r),
           )),
         ),
       );
@@ -2166,7 +2163,8 @@ export async function pageSign({ params }) {
     return h('div', { class: 'banner banner--info' },
       h('div', { class: 'banner__icon' }, 'i'),
       h('div', { class: 'banner__body' },
-        'Signing as ', h('strong', null, currentRole === 'tenant' ? 'Tenant' : 'Landlord')));
+        t('sign.signingAsFixed'),
+        h('strong', null, t(currentRole === 'tenant' ? 'role.tenant' : 'role.landlord'))));
   }
 
   function buildAcceptedRow() {
@@ -2183,9 +2181,7 @@ export async function pageSign({ params }) {
       },
     },
       h('span', { class: 'form-check__indicator', 'aria-hidden': 'true' }),
-      h('span', { class: 'form-check__label' },
-        'I confirm the contents of this inspection are accurate and that I am the named signer.',
-      ),
+      h('span', { class: 'form-check__label' }, t('sign.accept')),
     );
   }
 
@@ -2194,7 +2190,7 @@ export async function pageSign({ params }) {
       class: 'btn btn--primary bottom-bar__primary',
       disabled: submitting || undefined,
       onClick: submit,
-    }, submitting ? 'Submitting…' : 'Submit signature');
+    }, submitting ? t('sign.submitting') : t('sign.submit'));
   }
 
   function updateSubmitButton() {
@@ -2211,7 +2207,7 @@ export async function pageSign({ params }) {
 
     mount(root(),
       h('div', { class: 'app-layout' },
-        appHeader({ title: 'Sign', onBack: () => navigate('/inspection/' + inspectionId) }),
+        appHeader({ title: t('sign.title'), onBack: () => navigate('/inspection/' + inspectionId) }),
         h('main', { class: 'app-body app-body--has-bottom-bar' },
           h('div', { class: 'page' },
             h('div', { class: 'card' },
@@ -2222,7 +2218,7 @@ export async function pageSign({ params }) {
             roleSection,
 
             h('div', { class: 'form-group' },
-              h('label', { class: 'form-label' }, 'Full name (printed) ', h('span', { class: 'form-label__required' }, '*')),
+              h('label', { class: 'form-label' }, t('sign.fullName') + ' ', h('span', { class: 'form-label__required' }, '*')),
               h('input', {
                 type: 'text',
                 class: 'form-input',
@@ -2233,10 +2229,10 @@ export async function pageSign({ params }) {
             ),
 
             h('div', { class: 'form-group' },
-              h('label', { class: 'form-label' }, 'Signature ', h('span', { class: 'form-label__required' }, '*')),
+              h('label', { class: 'form-label' }, t('sign.signature') + ' ', h('span', { class: 'form-label__required' }, '*')),
               pad.element,
               h('div', { class: 'signature-pad__actions' },
-                h('button', { class: 'btn btn--ghost btn--sm', onClick: () => pad.clear() }, 'Clear'),
+                h('button', { class: 'btn btn--ghost btn--sm', onClick: () => pad.clear() }, t('signature.clear')),
               ),
             ),
 
@@ -2244,7 +2240,7 @@ export async function pageSign({ params }) {
           ),
         ),
         bottomBar(
-          h('button', { class: 'btn btn--secondary', onClick: () => navigate('/inspection/' + inspectionId) }, 'Cancel'),
+          h('button', { class: 'btn btn--secondary', onClick: () => navigate('/inspection/' + inspectionId) }, t('action.cancel')),
           submitButton,
         ),
       )
@@ -2252,9 +2248,9 @@ export async function pageSign({ params }) {
   }
 
   async function submit() {
-    if (!signerName.trim()) { toastWarning('Name required.'); return; }
-    if (!accepted) { toastWarning('You must accept the confirmation.'); return; }
-    if (pad.isEmpty()) { toastWarning('Please draw your signature.'); return; }
+    if (!signerName.trim()) { toastWarning(t('sign.needName')); return; }
+    if (!accepted) { toastWarning(t('sign.needAccept')); return; }
+    if (pad.isEmpty()) { toastWarning(t('sign.needSignature')); return; }
 
     // Capture signature data IMMEDIATELY before any other state changes,
     // since the canvas is the source of truth and must not be modified during submit.
@@ -2273,12 +2269,12 @@ export async function pageSign({ params }) {
         base64Png: signatureBase64,
         userAgent: navigator.userAgent,
       });
-      toastSuccess('Signature saved.');
+      toastSuccess(t('sign.saved'));
       await applyMutationState(result, inspectionId);
     } catch (e) {
       submitting = false;
       updateSubmitButton();
-      toastError(e.message || 'Signature submission failed');
+      toastError(e.message || t('sign.failed'));
       return;
     }
 
@@ -2335,20 +2331,20 @@ export async function pageSign({ params }) {
 
 async function offerFinalize(inspectionId) {
   const ok = await confirm({
-    title: 'Generate final report?',
-    message: 'All signatures collected. Generate the final PDF now? This may take 30–60 seconds.',
-    confirmLabel: 'Generate PDF',
+    title: t('final.offerTitle'),
+    message: t('final.offerMessage'),
+    confirmLabel: t('final.offerConfirm'),
   });
   if (!ok) {
     navigate(`/inspection/${inspectionId}/success`);
     return;
   }
-  showSpinner('Generating PDF…');
+  showSpinner(t('final.generating'));
   try {
     // Applied before navigating, so the success screen — which is where the
     // new PDF's link lives — draws from it instead of fetching it back.
     await applyMutationState(await api.finalizeInspection(inspectionId), inspectionId);
-    toastSuccess('Final PDF ready.');
+    toastSuccess(t('final.ready'));
     navigate(`/inspection/${inspectionId}/success`);
   } catch (e) {
     toastError(e.message);
@@ -2368,11 +2364,11 @@ export async function pageSuccess({ params }) {
   // server's own copy into state — fetching it again was a guaranteed round
   // trip for something already in hand.
   if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading…');
+    showSpinner(t('boot.loading'));
     try {
       setInspectionData(await api.getInspection(inspectionId));
     } catch (e) {
-      return showError('Could not load inspection', e.message);
+      return showError(t('inspection.loadFailed'), e.message);
     }
   }
   const isStaff = getState().authMode === 'user';
@@ -2383,7 +2379,7 @@ export async function pageSuccess({ params }) {
     finalizing = true; render();
     try {
       await applyMutationState(await api.finalizeInspection(inspectionId), inspectionId);
-      toastSuccess('Final PDF generated.');
+      toastSuccess(t('final.generated'));
     } catch (e) {
       toastError(e.message);
     } finally {
@@ -2400,14 +2396,14 @@ export async function pageSuccess({ params }) {
     mount(root(),
       h('div', { class: 'app-layout' },
         appHeader({
-          title: 'Inspection complete',
+          title: t('success.title'),
           onBack: isStaff ? () => navigate('/admin') : null,
         }),
         h('main', { class: 'app-body' },
           h('div', { class: 'page' },
             h('div', { class: 'card text-center' },
               h('div', { style: { fontSize: '3rem', color: 'var(--color-success)' } }, '✓'),
-              h('h2', { class: 'card__title mt-3' }, i.status === 'signed' ? 'All signatures collected' : statusLabel(i.status)),
+              h('h2', { class: 'card__title mt-3' }, i.status === 'signed' ? t('success.allSigned') : statusLabel(i.status)),
               h('p', { class: 'card__meta mt-2' }, i.propertyAddress),
               h('p', { class: 'card__meta' }, i.inspectionId),
             ),
@@ -2418,20 +2414,20 @@ export async function pageSuccess({ params }) {
                   href: pdfUrl,
                   target: '_blank',
                   rel: 'noopener noreferrer',
-                }, 'Open final PDF')
+                }, t('success.openPdf'))
               : isStaff
                 ? h('button', {
                     class: 'btn btn--primary btn--block mt-4',
                     disabled: finalizing || undefined,
                     onClick: doFinalize,
-                  }, finalizing ? 'Generating…' : 'Generate final PDF')
+                  }, finalizing ? t('success.generatingShort') : t('success.generate'))
                 : h('div', { class: 'banner banner--info mt-4' },
                     h('div', { class: 'banner__icon' }, 'i'),
-                    h('div', { class: 'banner__body' }, 'The landlord will finalize the report shortly.')),
+                    h('div', { class: 'banner__body' }, t('success.waitForLandlord'))),
 
             isStaff
               ? h('button', { class: 'btn btn--secondary btn--block mt-3', onClick: () => navigate('/admin') },
-                  'Back to inspections')
+                  t('success.backToList'))
               : null,
           ),
         ),
@@ -2456,19 +2452,19 @@ export async function pageSuccess({ params }) {
 function openAssign(inspectionId, currentEmail) {
   const slot = h('div', null, h('div', { class: 'boot-spinner' }));
   const modal = openModal({
-    title: 'Assign inspection',
+    title: t('assign.title'),
     body: slot,
-    footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, 'Cancel')],
+    footer: [h('button', { class: 'btn btn--secondary', onClick: () => modal.close() }, t('action.cancel'))],
   });
 
   api.listUsers().then(res => {
     const users = (res.users || []).filter(u => u.status === 'active');
     if (users.length === 0) {
-      mount(slot, h('p', { class: 'text-muted text-sm' }, 'No active users to assign to.'));
+      mount(slot, h('p', { class: 'text-muted text-sm' }, t('assign.none')));
       return;
     }
     mount(slot,
-      h('p', { class: 'text-muted text-sm' }, 'Who will carry out this inspection.'),
+      h('p', { class: 'text-muted text-sm' }, t('assign.who')),
       h('ul', { class: 'list mt-3' },
         users.map(u => h('li', {
           class: 'list-item list-item--clickable',
@@ -2477,7 +2473,7 @@ function openAssign(inspectionId, currentEmail) {
             try {
               const res = await api.assignInspection(inspectionId, u.email);
               invalidateCachedList();
-              toastSuccess(`Assigned to ${u.name}.`);
+              toastSuccess(t('assign.done', { name: u.name }));
               // The server's own copy rather than a local patch: it normalises
               // the address and resolves the assignee's name, and showing
               // anything else would be a small lie about what was stored.
@@ -2493,7 +2489,7 @@ function openAssign(inspectionId, currentEmail) {
             h('div', { class: 'list-item__meta' }, u.email),
           ),
           u.email === currentEmail
-            ? h('span', { class: 'badge badge--info' }, 'Current')
+            ? h('span', { class: 'badge badge--info' }, t('assign.current'))
             : h('span', { class: 'list-item__chevron' }, '›'),
         ))));
   }).catch(e => {
@@ -2508,12 +2504,12 @@ export async function pageAdminDetail({ params }) {
   // list and left again immediately, which is exactly the pattern that made
   // every click cost a fetch.
   if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading…');
+    showSpinner(t('boot.loading'));
     try {
       const data = await api.getInspection(inspectionId);
       setInspectionData(data);
     } catch (e) {
-      return showError('Could not load inspection', e.message);
+      return showError(t('inspection.loadFailed'), e.message);
     }
   }
 
@@ -2532,7 +2528,7 @@ export async function pageAdminDetail({ params }) {
     mount(root(),
       h('div', { class: 'app-layout' },
         appHeader({
-          title: i.propertyAddress || 'Inspection',
+          title: i.propertyAddress || t('inspection.fallbackTitle'),
           subtitle: i.inspectionId,
           onBack: () => navigate('/admin'),
         }),
@@ -2546,21 +2542,22 @@ export async function pageAdminDetail({ params }) {
               h('h2', { class: 'card__title mt-3' }, i.propertyAddress),
               h('p', { class: 'card__meta' }, inspectionTypeLabel(i.inspectionType)),
               h('div', { class: 'mt-3 text-sm' },
-                h('div', null, h('strong', null, 'Tenant: '), i.tenantName, ' (', i.tenantEmail || 'no email', ')'),
-                h('div', null, h('strong', null, 'Landlord: '), i.landlordName),
-                h('div', null, h('strong', null, 'Created: '), formatDate(i.createdAt), ' by ', i.createdBy || 'unknown'),
+                h('div', null, h('strong', null, t('detail.tenant')), i.tenantName, ' (', i.tenantEmail || t('detail.noEmail'), ')'),
+                h('div', null, h('strong', null, t('detail.landlord')), i.landlordName),
+                h('div', null, h('strong', null, t('detail.created')), formatDate(i.createdAt),
+                  t('detail.createdBy'), i.createdBy || t('detail.unknown')),
                 h('div', null,
-                  h('strong', null, 'Assigned to: '),
+                  h('strong', null, t('detail.assignedTo')),
                   // Falls back to the address when no account matches it any
                   // more — a deleted user should show as something, not blank.
                   i.assignedToName || i.assignedTo
-                    || h('span', { class: 'text-muted' }, 'nobody'),
+                    || h('span', { class: 'text-muted' }, t('detail.nobody')),
                   isAdmin()
                     ? h('button', {
                         class: 'btn btn--sm btn--ghost',
                         style: { marginLeft: 'var(--space-2)' },
                         onClick: () => openAssign(inspectionId, i.assignedTo),
-                      }, 'Change')
+                      }, t('action.change'))
                     : null,
                 ),
               ),
@@ -2570,11 +2567,12 @@ export async function pageAdminDetail({ params }) {
               h('div', { style: { flex: 1 } },
                 progressBar(progress.completedRequired, progress.totalRequired || 1)),
               h('span', { class: 'text-xs text-muted' },
-                progress.completedRequired, '/', progress.totalRequired, ' required'),
+                progress.completedRequired, '/', progress.totalRequired,
+                t('inspection.requiredCount')),
             ),
 
             h('div', { class: 'flex gap-3 mt-3' },
-              h('button', { class: 'btn btn--primary', onClick: () => navigate('/inspection/' + inspectionId) }, 'Open editor'),
+              h('button', { class: 'btn btn--primary', onClick: () => navigate('/inspection/' + inspectionId) }, t('detail.openEditor')),
               h('button', {
                 class: 'btn btn--secondary',
                 onClick: async () => {
@@ -2585,28 +2583,28 @@ export async function pageAdminDetail({ params }) {
                     toastError(e.message);
                   }
                 }
-              }, 'New tenant link'),
+              }, t('detail.newTenantLink')),
               canUnlock
                 ? h('button', {
                     class: 'btn btn--secondary',
                     onClick: async () => {
                       const ok = await confirm({
-                        title: 'Unlock inspection?',
-                        message: 'This will invalidate all collected signatures. The tenant link will need to be re-shared.',
-                        confirmLabel: 'Unlock',
+                        title: t('detail.unlockTitle'),
+                        message: t('detail.unlockMessage'),
+                        confirmLabel: t('detail.unlock'),
                         danger: true,
                       });
                       if (!ok) return;
                       try {
-                        const res = await api.unlockInspection(inspectionId, 'admin requested');
-                        toastSuccess('Unlocked.');
+                        const res = await api.unlockInspection(inspectionId, t('detail.unlockReason'));
+                        toastSuccess(t('detail.unlocked'));
                         await applyMutationState(res, inspectionId);
                         render();
                       } catch (e) {
                         toastError(e.message);
                       }
                     },
-                  }, 'Unlock')
+                  }, t('detail.unlock'))
                 : null,
             ),
 
@@ -2615,7 +2613,7 @@ export async function pageAdminDetail({ params }) {
                   class: 'btn btn--primary btn--block mt-3',
                   href: `https://drive.google.com/file/d/${i.finalPdfFileId}/view`,
                   target: '_blank', rel: 'noopener',
-                }, 'Open final PDF')
+                }, t('success.openPdf'))
               : null,
           )
         )
@@ -2632,17 +2630,17 @@ function showTenantLinkInModal(url, expiresAt) {
     onClick: (e) => e.target.select(),
   });
   const m = openModal({
-    title: 'New tenant link',
+    title: t('tenantLink.title'),
     body: h('div', null,
       linkInput,
-      h('p', { class: 'text-xs text-muted mt-2' }, 'Expires: ' + formatDateTime(expiresAt)),
-      h('p', { class: 'text-xs text-muted mt-2' }, 'Note: previous tenant links are now invalid.'),
+      h('p', { class: 'text-xs text-muted mt-2' }, t('tenantLink.expires', { when: formatDateTime(expiresAt) })),
+      h('p', { class: 'text-xs text-muted mt-2' }, t('tenantLink.previousInvalid')),
     ),
     footer: [
       h('button', { class: 'btn btn--secondary', onClick: () => {
-        navigator.clipboard.writeText(url).then(() => toastSuccess('Copied'));
-      }}, 'Copy'),
-      h('button', { class: 'btn btn--primary', onClick: () => m.close() }, 'Done'),
+        navigator.clipboard.writeText(url).then(() => toastSuccess(t('new.copied')));
+      }}, t('action.copy')),
+      h('button', { class: 'btn btn--primary', onClick: () => m.close() }, t('action.done')),
     ],
   });
 }
@@ -2655,7 +2653,7 @@ function showSpinner(label) {
   mount(root(),
     h('div', { class: 'boot-screen', 'aria-busy': 'true' },
       h('div', { class: 'boot-spinner' }),
-      h('p', null, label || 'Loading…'),
+      h('p', null, label || t('boot.loading')),
     )
   );
 }
@@ -2663,7 +2661,7 @@ function showSpinner(label) {
 function showError(title, message) {
   mount(root(),
     h('div', { class: 'app-layout' },
-      appHeader({ title: 'Error', onBack: () => navigate('/') }),
+      appHeader({ title: t('error.title'), onBack: () => navigate('/') }),
       h('main', { class: 'app-body' },
         h('div', { class: 'page' },
           h('div', { class: 'banner banner--danger' },

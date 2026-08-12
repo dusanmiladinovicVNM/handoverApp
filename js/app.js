@@ -11,6 +11,7 @@
 
 import * as Router from './router.js';
 import { h, mount } from './utils/dom.js';
+import { t, applyDocumentLang, onLangChange } from './i18n.js';
 import { setAuth } from './api.js';
 import { setState, getState, isAdmin } from './state.js';
 import { restoreSession } from './auth.js';
@@ -48,6 +49,9 @@ if ('serviceWorker' in navigator) {
 // ============================================================
 
 async function boot() {
+  applyDocumentLang();
+  watchLanguage();
+
   const route = Router.getCurrentRoute();
   const tenantToken = route.query.t;
 
@@ -70,6 +74,25 @@ async function boot() {
 
   registerRoutes();
   Router.start();
+}
+
+// ============================================================
+// Language
+// ============================================================
+
+/**
+ * Every screen is built from t() at render time, so changing the language means
+ * drawing the current route again — there is no tree to walk and patch.
+ *
+ * Router.refresh() rather than location.reload(): a reload would throw away the
+ * inspection, schema and answers already in state and fetch them back, which on
+ * this backend is several seconds, and it would do it on a screen where someone
+ * may be mid-form. The redraw goes through the router's own dispatch, so the
+ * outgoing page's cleanup runs first and the section editor flushes what was
+ * typed before it is replaced.
+ */
+function watchLanguage() {
+  onLangChange(() => Router.refresh());
 }
 
 // ============================================================
@@ -104,9 +127,9 @@ function registerRoutes() {
     const code = h('code', null, path);
     mount(document.getElementById('app-root'),
       h('div', { class: 'app-body' },
-        h('h1', { class: 'page__title' }, 'Page not found'),
-        h('p', { class: 'text-muted' }, 'No route for ', code),
-        h('a', { href: '#/', class: 'btn btn--primary mt-4' }, 'Back to home'),
+        h('h1', { class: 'page__title' }, t('notFound.title')),
+        h('p', { class: 'text-muted' }, t('notFound.body'), code),
+        h('a', { href: '#/', class: 'btn btn--primary mt-4' }, t('notFound.home')),
       ));
   });
 
@@ -160,7 +183,7 @@ boot().catch((e) => {
   mount(document.getElementById('app-root'),
     h('div', { class: 'app-body' },
       h('div', { class: 'banner banner--danger' },
-        h('strong', null, 'Boot failed: '),
+        h('strong', null, t('boot.failed')),
         String((e && e.message) || e),
       )));
 });

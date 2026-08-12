@@ -35,6 +35,7 @@ const suites = [
   ['Inspection lifecycle', require('./lifecycle.test')],
   ['Validator parity', require('./validator-parity.test')],
   ['Markup safety', require('./markup.test')],
+  ['Languages', require('./i18n.test')],
 ];
 
 // Awaited, because the frontend suites import ES modules and so are async.

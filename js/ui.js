@@ -4,6 +4,7 @@
  */
 
 import { h } from './utils/dom.js';
+import { t } from './i18n.js';
 
 // ============================================================
 // Toasts
@@ -54,17 +55,17 @@ export function confirm(opts) {
     }},
       h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true' },
         h('div', { class: 'modal__header' },
-          h('h2', { class: 'modal__title' }, opts.title || 'Confirm')
+          h('h2', { class: 'modal__title' }, opts.title || t('modal.confirmTitle'))
         ),
         h('div', { class: 'modal__body' },
-          h('p', null, opts.message || 'Are you sure?')
+          h('p', null, opts.message || t('modal.confirmMessage'))
         ),
         h('div', { class: 'modal__footer' },
-          h('button', { class: 'btn btn--secondary', onClick: onCancel }, opts.cancelLabel || 'Cancel'),
+          h('button', { class: 'btn btn--secondary', onClick: onCancel }, opts.cancelLabel || t('action.cancel')),
           h('button', {
             class: ['btn', opts.danger ? 'btn--danger' : 'btn--primary'],
             onClick: onConfirm,
-          }, opts.confirmLabel || 'Confirm')
+          }, opts.confirmLabel || t('action.confirm'))
         )
       )
     );
