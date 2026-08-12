@@ -213,12 +213,38 @@ const SheetService = (function () {
     return obj;
   }
 
+  /**
+   * Characters that make a sheet cell try to be a formula.
+   *
+   * A phone number is the one that bit. `+381 60 123 45 67` written through
+   * appendRow is parsed as an expression, fails, and the cell keeps #ERROR!
+   * — so the number is gone, silently, from a document whose whole purpose is
+   * to be evidence later. It was found by comparing 5 603 cells of a live
+   * workbook against a second way of reading them; nothing in the app ever
+   * complained, and the PDF would have printed #ERROR! where a phone number
+   * belongs.
+   */
+  const FORMULA_STARTERS = ['=', '+', '-', '@'];
+
+  /**
+   * Keep a string a string.
+   *
+   * A leading apostrophe is Sheets' own marker for "this is text": it is not
+   * part of the value, and getValues returns the string without it. Applied
+   * only to strings, so numbers and booleans reach the cell with their types
+   * intact — which the five `=== true` comparisons in this file depend on.
+   */
+  function _asText(value) {
+    if (typeof value !== 'string' || value === '') return value;
+    return FORMULA_STARTERS.indexOf(value.charAt(0)) >= 0 ? `'${value}` : value;
+  }
+
   function _objectToRow(sheetName, obj) {
     const cols = COLUMNS[sheetName];
     const row = [];
     for (let i = 0; i < cols.length; i++) {
       const v = obj[cols[i]];
-      row.push(v === undefined || v === null ? '' : v);
+      row.push(v === undefined || v === null ? '' : _asText(v));
     }
     return row;
   }
@@ -809,8 +835,9 @@ const SheetService = (function () {
     const revoked = [];
     for (let i = 0; i < data.length; i++) {
       if (String(data[i][userIdIdx]) === userId && !data[i][revokedAtIdx]) {
-        _write(() => sheet.getRange(i + 2, revokedAtIdx + 1).setValue(now));
-        _write(() => sheet.getRange(i + 2, revokedByIdx + 1).setValue(revokedBy || 'system'));
+        _write(() => sheet.getRange(i + 2, revokedAtIdx + 1).setValue(_asText(now)));
+        _write(() => sheet.getRange(i + 2, revokedByIdx + 1)
+          .setValue(_asText(revokedBy || 'system')));
         revoked.push(String(data[i][deviceIdIdx]));
       }
     }
