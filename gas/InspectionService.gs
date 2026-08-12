@@ -99,6 +99,19 @@ const InspectionService = (function () {
     Utils.requireField(data, 'inspectionId', 'string');
     AuthService.requireInspectionAccess(authCtx, data.inspectionId);
 
+    // Named together, so they arrive in one request instead of four.
+    //
+    // This is the only call anyone waits on inside the app, and its server time
+    // was mostly the sheets: 525 ms opening the workbook plus 561 reading,
+    // against 150 for one batchGet of the same four ranges. Asking for them one
+    // at a time would keep four round trips and throw the saving away.
+    //
+    // Naming a sheet that is not needed costs a range in a request that is
+    // happening anyway; forgetting one costs a whole extra request, so the list
+    // errs towards complete.
+    SheetService.prefetch(
+      ['Inspections', 'SectionAnswers', 'Attachments', 'Signatures']);
+
     const inspection = SheetService.getInspection(data.inspectionId);
     if (!inspection) throw new HandoverError('NOT_FOUND', 'Inspection not found.');
 
