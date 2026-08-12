@@ -249,16 +249,43 @@ function report(results, serverTimings) {
     String(totalMs + ' ms').padStart(8) + String(totalReqs).padStart(7));
 
   if (serverTimings.length) {
-    console.log('\n  What the server said about itself:\n');
-    console.log('  action              total   auth  reads  writes  lockWait  drive');
-    console.log('  ' + '-'.repeat(66));
+    // Counts and milliseconds together. It used to print how many reads and
+    // writes an action made but not what they cost, which left the biggest
+    // number in the walk — sign-in's 4 487 ms of server time — as something to
+    // apportion by arithmetic and guesswork. Every figure below was already
+    // being collected; only the table was narrow.
+    //
+    // "rest" is what is left after the parts that are measured: parsing,
+    // projection, JSON, and whatever else the handler does in plain CPU. It is
+    // derived rather than measured, so it also absorbs any drift between the
+    // pieces — a large one means the breakdown is missing something, which is
+    // worth knowing in itself.
+    console.log('\n  What the server said about itself, in ms:\n');
+    console.log('  action                 total   auth   open  reads(n)  writes(n)'
+      + '  pbkdf2   lock  drive   rest');
+    console.log('  ' + '-'.repeat(92));
     for (const t of serverTimings) {
+      const n = (v) => Number(v || 0);
+      // auth is deliberately not in this sum. It is a phase of the request, not
+      // a component of it: the sheet reads it makes are already in openMs and
+      // readMs, so adding it would count them twice and drive rest negative.
+      const accounted = n(t.openMs) + n(t.readMs) + n(t.writeMs)
+        + n(t.pbkdf2Ms) + n(t.lockWaitMs) + n(t.driveMs);
       console.log('  ' + String(t.action).padEnd(20) +
-        String(t.totalMs).padStart(5) + String(t.authMs).padStart(7) +
-        String(t.reads).padStart(7) + String(t.writes).padStart(8) +
-        String(t.lockWaitMs).padStart(10) + String(t.driveMs).padStart(7));
+        String(n(t.totalMs)).padStart(6) +
+        String(n(t.authMs)).padStart(7) +
+        String(n(t.openMs)).padStart(7) +
+        `${n(t.readMs)}(${n(t.reads)})`.padStart(10) +
+        `${n(t.writeMs)}(${n(t.writes)})`.padStart(11) +
+        String(n(t.pbkdf2Ms)).padStart(8) +
+        String(n(t.lockWaitMs)).padStart(7) +
+        String(n(t.driveMs)).padStart(7) +
+        String(n(t.totalMs) - accounted).padStart(7));
     }
-    console.log('\n  The difference between a step\'s wall time and its total here is');
+    console.log('\n  auth is a phase, not a column of the breakdown: the reads it makes');
+    console.log('  are already inside open and reads. rest is total minus the rest of');
+    console.log('  the row, so a large rest means something is not being measured.');
+    console.log('\n  The difference between a step\'s wall time and the total here is');
     console.log('  transport, the /exec redirect, and Apps Script cold start.');
   } else if (LIVE) {
     console.log('\n  No server timings came back. They are returned to admins only.');
