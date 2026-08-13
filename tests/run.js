@@ -32,8 +32,10 @@ const suites = [
   ['Local drafts', require('./drafts.test')],
   ['Pending saves', require('./pending-saves.test')],
   ['API timeouts', require('./api-timeouts.test')],
+  ['Restoring a session', require('./session-restore.test')],
   ['Inspection lifecycle', require('./lifecycle.test')],
   ['Validator parity', require('./validator-parity.test')],
+  ['Reading the final PDF', require('./pdf-download.test')],
   ['Markup safety', require('./markup.test')],
 ];
 

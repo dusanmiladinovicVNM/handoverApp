@@ -174,6 +174,7 @@ Key-value store for runtime config. Editable by admin without code change.
 - `maxAttachmentsPerInspection = 80`
 - `imageMaxDimPx = 1600`
 - `imageJpegQuality = 0.75`
+- `maxPdfDownloadMb = 20`
 - `adminEmailAllowlist = admin@firma.rs,manager@firma.rs` (comma-separated)
 - `templateDocId = <Google Doc template ID>`
 - `inspectionsRootFolderId = <Drive folder ID>`
