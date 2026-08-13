@@ -17,6 +17,7 @@ import { h, escapeHtml, debounce } from './utils/dom.js';
 import { statusLabel, statusBadgeClass } from './utils/format.js';
 import { compressImage } from './utils/image.js';
 import * as thumbs from './utils/thumbs.js';
+import { openPhoto } from './photo-viewer.js';
 import { api } from './api.js';
 import { toastError, toastSuccess, confirm } from './ui.js';
 import { addAttachmentLocally, removeAttachmentLocally, getState, patchAnswer } from './state.js';
@@ -373,7 +374,24 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
       // this one", or undefined for "not fetched yet". The three are different
       // and the screen used to show the same broken icon for all of them.
       const preview = thumbs.peek(att.attachmentId);
-      const item = h('div', { class: 'image-grid__item' },
+      const item = h('div', {
+        class: 'image-grid__item image-grid__item--tappable',
+        role: 'button',
+        tabIndex: 0,
+        'aria-label': `Open ${att.caption || att.fileName || 'photograph'}`,
+        onClick: (e) => {
+          // Not when the remove button was the target — it sits on top of the
+          // picture, and opening a photograph in order to delete it would be a
+          // strange way to spend three seconds.
+          if (e.target.closest('.image-grid__item-remove')) return;
+          openPhoto({ inspectionId, attachment: att, fetcher: api.getAttachmentFile });
+        },
+        onKeyDown: (e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          openPhoto({ inspectionId, attachment: att, fetcher: api.getAttachmentFile });
+        },
+      },
         preview
           ? h('img', { src: preview, alt: att.caption || '', loading: 'lazy' })
           : h('div', {
@@ -448,7 +466,11 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
       // it beats asking the server for a copy: it is instant, it works offline,
       // and Drive has usually not finished making a preview of a file uploaded
       // this second.
-      thumbs.remember(result.attachmentId, `data:image/jpeg;base64,${compressed.base64Data}`);
+      const justTaken = `data:image/jpeg;base64,${compressed.base64Data}`;
+      thumbs.remember(result.attachmentId, justTaken);
+      // And at full size, so tapping the photograph you just took opens it
+      // without asking the server for a copy of what is already here.
+      thumbs.rememberFull(result.attachmentId, justTaken);
 
       const attachment = {
         attachmentId: result.attachmentId,

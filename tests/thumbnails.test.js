@@ -229,4 +229,104 @@ module.exports = async function run() {
     thumbs.forget('ATT-1');
     assert(thumbs.peek('ATT-1') === undefined, 'the preview outlived the photograph');
   });
+
+  section('A photograph opens when it is tapped:');
+
+  await check('the full picture is fetched once, however many taps', async () => {
+    // A double tap is one gesture. Two requests of several hundred kilobytes
+    // for it would be worse than the delay they are trying to shorten.
+    thumbs.clear();
+    let calls = 0;
+    const fetcher = () => {
+      calls++;
+      return Promise.resolve({ mimeType: 'image/jpeg', base64Data: 'RlVMTA==' });
+    };
+    const a = thumbs.loadFull('INS-1', 'ATT-1', fetcher);
+    const b = thumbs.loadFull('INS-1', 'ATT-1', fetcher);
+    await Promise.all([a, b]);
+    assert(calls === 1, `${calls} requests for one photograph`);
+  });
+
+  await check('and not at all for one taken on this device', async () => {
+    // The camera already gave us the picture, at the size it was uploaded.
+    thumbs.clear();
+    thumbs.rememberFull('ATT-1', 'data:image/jpeg;base64,LOCAL');
+    let calls = 0;
+    const url = await thumbs.loadFull('INS-1', 'ATT-1', () => {
+      calls++;
+      return Promise.resolve({ mimeType: 'image/jpeg', base64Data: 'RlVMTA==' });
+    });
+    assert(calls === 0, 'the server was asked for a picture already here');
+    assert(url === 'data:image/jpeg;base64,LOCAL', `got ${url}`);
+  });
+
+  await check('a second look costs nothing', async () => {
+    thumbs.clear();
+    let calls = 0;
+    const fetcher = () => {
+      calls++;
+      return Promise.resolve({ mimeType: 'image/png', base64Data: 'RlVMTA==' });
+    };
+    await thumbs.loadFull('INS-1', 'ATT-1', fetcher);
+    const again = await thumbs.loadFull('INS-1', 'ATT-1', fetcher);
+    assert(calls === 1, `${calls} requests`);
+    assert(again === 'data:image/png;base64,RlVMTA==', `got ${again}`);
+  });
+
+  await check('a failed fetch can be retried', async () => {
+    // The opposite would make one bad moment permanent for that photograph:
+    // an in-flight entry left behind would be handed to every later tap.
+    thumbs.clear();
+    let calls = 0;
+    const failing = () => { calls++; return Promise.reject(new Error('offline')); };
+    try { await thumbs.loadFull('INS-1', 'ATT-1', failing); } catch (_) {}
+    try { await thumbs.loadFull('INS-1', 'ATT-1', failing); } catch (_) {}
+    assert(calls === 2, `${calls} attempts — a failure was left in flight`);
+  });
+
+  section('Full pictures do not accumulate without limit:');
+
+  await check('only the last few are kept', async () => {
+    // A preview is kilobytes and there are tens of them; a full picture is
+    // hundreds and thirty held at once is enough for a phone to start
+    // discarding the tab.
+    thumbs.clear();
+    for (let i = 1; i <= 8; i++) {
+      thumbs.rememberFull(`ATT-${i}`, `data:image/jpeg;base64,IMG${i}`);
+    }
+    assert(thumbs.peekFull('ATT-8') === 'data:image/jpeg;base64,IMG8',
+      'the newest was dropped');
+    assert(thumbs.peekFull('ATT-1') === undefined,
+      'the oldest was kept, so nothing is ever released');
+  });
+
+  await check('and looking at one again makes it recent', async () => {
+    thumbs.clear();
+    for (let i = 1; i <= 5; i++) {
+      thumbs.rememberFull(`ATT-${i}`, `data:image/jpeg;base64,IMG${i}`);
+    }
+    // Looked at again: it should now outlive the ones stored after it.
+    thumbs.rememberFull('ATT-1', 'data:image/jpeg;base64,IMG1');
+    thumbs.rememberFull('ATT-6', 'data:image/jpeg;base64,IMG6');
+
+    assert(thumbs.peekFull('ATT-1'), 'the one just looked at was evicted');
+    assert(thumbs.peekFull('ATT-2') === undefined,
+      'the genuinely oldest survived instead');
+  });
+
+  await check('previews are not evicted with them', async () => {
+    // They are cheap and there are many; the limit is on the expensive ones.
+    thumbs.clear();
+    for (let i = 1; i <= 20; i++) thumbs.remember(`ATT-${i}`, `data:image/jpeg;base64,T${i}`);
+    assert(thumbs.peek('ATT-1'), 'a preview was dropped under the full-size limit');
+  });
+
+  await check('deleting a photograph drops both copies', async () => {
+    thumbs.clear();
+    thumbs.remember('ATT-1', 'data:image/jpeg;base64,SMALL');
+    thumbs.rememberFull('ATT-1', 'data:image/jpeg;base64,LARGE');
+    thumbs.forget('ATT-1');
+    assert(thumbs.peek('ATT-1') === undefined, 'the preview outlived the photograph');
+    assert(thumbs.peekFull('ATT-1') === undefined, 'the full picture outlived it');
+  });
 };

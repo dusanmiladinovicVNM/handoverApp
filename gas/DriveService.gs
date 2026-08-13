@@ -272,6 +272,35 @@ const DriveService = (function () {
    * absence rather than failure, because a missing preview is not a missing
    * photograph.
    */
+  /**
+   * One photograph at full size, with its own size guard.
+   *
+   * Separate from getThumbnailBytes because the two are asked for at different
+   * moments and cost two orders of magnitude apart: a preview is a few
+   * kilobytes and a section's worth arrive together, while this is hundreds of
+   * kilobytes fetched only when somebody taps a picture to look at it.
+   *
+   * The limit is checked from Drive's metadata before the bytes are read, for
+   * the same reason downloadPdf does it: a file large enough to end the
+   * execution ends it inside getBlob, where no refusal can help.
+   */
+  function getFileBytes(fileId, maxBytes) {
+    const size = Number(getFileSize(fileId) || 0);
+    if (maxBytes && size > maxBytes) {
+      throw new HandoverError('FILE_TOO_LARGE',
+        `That photograph is ${Math.ceil(size / (1024 * 1024))} MB, more than a `
+        + 'single response can carry.');
+    }
+    return _file(function () {
+      const blob = DriveApp.getFileById(fileId).getBlob();
+      return {
+        mimeType: blob.getContentType() || 'image/jpeg',
+        sizeBytes: size,
+        base64Data: Utilities.base64Encode(blob.getBytes()),
+      };
+    });
+  }
+
   function getThumbnailBytes(fileId) {
     return _file(function () {
       const blob = DriveApp.getFileById(fileId).getThumbnail();
@@ -295,6 +324,7 @@ const DriveService = (function () {
     getFileBlob,
     getFileSize,
     getThumbnailBytes,
+    getFileBytes,
     getStats,
   };
 })();

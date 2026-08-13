@@ -181,6 +181,10 @@ export const api = {
   // them. Drive's own thumbnails are a few kilobytes each.
   getSectionThumbs: (inspectionId, sectionId) =>
     call('getSectionThumbs', { inspectionId, sectionId }),
+  // One photograph at full size, when somebody taps it. Given the upload
+  // timeout because it is the same order of magnitude in the other direction.
+  getAttachmentFile: (inspectionId, attachmentId) =>
+    call('getAttachmentFile', { inspectionId, attachmentId }, API_TIMEOUT_UPLOAD),
 
   // --- Signatures ---
   saveSignature: (data) => call('saveSignature', data, API_TIMEOUT_UPLOAD),

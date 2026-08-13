@@ -94,6 +94,7 @@ const Router = (function () {
     'uploadAttachment': (authCtx, data) => AttachmentService.uploadAttachment(authCtx, data),
     'deleteAttachment': (authCtx, data) => AttachmentService.deleteAttachment(authCtx, data),
     'getSectionThumbs': (authCtx, data) => AttachmentService.getSectionThumbs(authCtx, data),
+    'getAttachmentFile': (authCtx, data) => AttachmentService.getAttachmentFile(authCtx, data),
     'saveSignature': (authCtx, data) => SignatureService.saveSignature(authCtx, data),
     'finalizeInspection': (authCtx, data) => PdfService.finalizeInspection(authCtx, data),
     // The report comes back through the API rather than as a Drive link, so
