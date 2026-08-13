@@ -79,7 +79,11 @@ const AttachmentService = (function () {
       deleted: false,
     });
 
-    SheetService.recomputeAttachmentCount(data.inspectionId, data.sectionId, data.itemId);
+    // The count is written into the section, which moves its revision on. The
+    // editor has to be told, or the next autosave sends the revision it read
+    // before the upload and is refused as somebody else's edit.
+    const recounted = SheetService.recomputeAttachmentCount(
+      data.inspectionId, data.sectionId, data.itemId);
     SheetService.updateInspection(data.inspectionId, { updatedAt: Utils.nowIso() });
 
     AuditService.log(data.inspectionId, authCtx.actorString, 'attachment_uploaded', {
@@ -96,6 +100,9 @@ const AttachmentService = (function () {
       attachmentId,
       fileId: saved.fileId,
       fileName: saved.fileName,
+      sectionId: data.sectionId,
+      attachmentCount: recounted.count,
+      revision: recounted.revision,
     };
   }
 
@@ -123,14 +130,21 @@ const AttachmentService = (function () {
       Utils.log('WARN', 'Failed to move file to _deleted folder, soft-delete sheet flag still set.', { error: e.message });
     }
 
-    SheetService.recomputeAttachmentCount(data.inspectionId, att.sectionId, att.itemId);
+    const recounted = SheetService.recomputeAttachmentCount(
+      data.inspectionId, att.sectionId, att.itemId);
     SheetService.updateInspection(data.inspectionId, { updatedAt: Utils.nowIso() });
 
     AuditService.log(data.inspectionId, authCtx.actorString, 'attachment_deleted', {
       attachmentId: data.attachmentId,
     });
 
-    return { attachmentId: data.attachmentId, deleted: true };
+    return {
+      attachmentId: data.attachmentId,
+      deleted: true,
+      sectionId: att.sectionId,
+      attachmentCount: recounted.count,
+      revision: recounted.revision,
+    };
   }
 
 

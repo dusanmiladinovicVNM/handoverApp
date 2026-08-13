@@ -75,7 +75,14 @@ async function ensureInspection(inspectionId, onRefreshed) {
   const held = getState().inspection;
   if (held && held.inspectionId === inspectionId) return true;
 
-  const remembered = await inspectionCache.read(inspectionId);
+  // Not for a tenant. getInspection strips tenantTokenHash, currentNonce and
+  // createdBy from a tenant's copy, and a cache read would hand back whatever
+  // the last viewer stored — which on the device the landlord passes across to
+  // be signed on is the landlord's full copy. A tenant opens one inspection
+  // once; there is nothing here worth that.
+  const remembered = getState().authMode === 'tenant'
+    ? null
+    : await inspectionCache.read(inspectionId);
   if (remembered && remembered.inspection) {
     setInspectionData(remembered);
     _revalidate(inspectionId, remembered.inspection.status, onRefreshed);
@@ -86,7 +93,9 @@ async function ensureInspection(inspectionId, onRefreshed) {
   try {
     const data = await api.getInspection(inspectionId);
     setInspectionData(data);
-    inspectionCache.write(inspectionId, data);
+    // Written only for staff, for the same reason it is not read for a tenant:
+    // one device, two people, two different views of the same inspection.
+    if (getState().authMode !== 'tenant') inspectionCache.write(inspectionId, data);
     return true;
   } catch (e) {
     showError('Could not load inspection', e.message);
@@ -98,27 +107,41 @@ async function ensureInspection(inspectionId, onRefreshed) {
 function _revalidate(inspectionId, shownStatus, onRefreshed) {
   api.getInspection(inspectionId)
     .then((fresh) => {
-      inspectionCache.write(inspectionId, fresh);
+      // Guarded even though a tenant never gets here — this only runs after a
+      // cached copy was read, and that is staff-only. Left to that reasoning it
+      // would be a hole the day ensureInspection changes, and the guard costs
+      // one condition.
+      if (getState().authMode !== 'tenant') inspectionCache.write(inspectionId, fresh);
       // Only if the person is still looking at this inspection. They may have
       // gone back to the list, or into another one, in the seconds this took.
       const current = getState().inspection;
       if (!current || current.inspectionId !== inspectionId) return;
 
-      // And only if nothing is outstanding. setInspectionData replaces the
-      // answers wholesale, so applying a reply that left the server before
-      // someone started typing would overwrite what they typed — with an older
-      // copy, silently, while they were looking at it. The cache is still
-      // updated above; the screen picks it up the next time it opens clean.
+      // The status is applied whatever else is happening, and said out loud.
+      //
+      // The first version held this back along with the answers whenever
+      // anything was unsaved, which got it exactly backwards. Someone who has
+      // started typing is the person who most needs to know the inspection was
+      // locked while they were reading it — otherwise they keep typing into a
+      // screen that says draft, and every save fails with a message about a
+      // status they cannot see.
+      const statusChanged = fresh.inspection
+        && fresh.inspection.status !== shownStatus;
+      if (statusChanged) {
+        setState({ inspection: fresh.inspection });
+        toastWarning(`This inspection is now ${statusLabel(fresh.inspection.status)}.`);
+        if (onRefreshed) onRefreshed(fresh);
+      }
+
+      // The answers are a different matter. setInspectionData replaces them
+      // wholesale, so applying a reply that left the server before someone
+      // started typing would overwrite what they typed — with an older copy,
+      // silently, while they were looking at it. The cache is updated above;
+      // the screen picks it up the next time it opens clean.
       if (draftSectionIds(inspectionId).length > 0 || outstandingSaves() > 0) return;
 
       setInspectionData(fresh);
-      if (onRefreshed) onRefreshed(fresh);
-
-      if (fresh.inspection && fresh.inspection.status !== shownStatus) {
-        // Said out loud because it changes what may be done here, and the
-        // screen was drawn on the old answer a moment ago.
-        toastWarning(`This inspection is now ${statusLabel(fresh.inspection.status)}.`);
-      }
+      if (onRefreshed && !statusChanged) onRefreshed(fresh);
     })
     .catch(() => {
       // Left as it is. The screen shows the last thing the server said, which
@@ -146,8 +169,9 @@ async function applyMutationState(result, inspectionId) {
   const data = (result && result.state) || await api.getInspection(inspectionId);
   setInspectionData(data);
   // Remembered too, so the next open draws the inspection as it is now rather
-  // than as it was before it was locked, signed or reassigned.
-  inspectionCache.write(inspectionId, data);
+  // than as it was before it was locked, signed or reassigned. Staff only —
+  // see ensureInspection for why a tenant's device must not keep one.
+  if (getState().authMode !== 'tenant') inspectionCache.write(inspectionId, data);
   return data;
 }
 

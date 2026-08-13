@@ -64,7 +64,9 @@ function loadAttachmentService(inspection) {
       }),
       getInspection: () => inspection,
       softDeleteAttachment: () => { calls.softDeleted++; },
-      recomputeAttachmentCount: () => {},
+      // Returns the section's new revision, as the real one does — the editor
+      // needs it or its next autosave is refused as somebody else's edit.
+      recomputeAttachmentCount: () => ({ count: 0, revision: 1 }),
       updateInspection: () => { calls.updated++; },
       createAttachment: () => {},
       countAttachmentsForItem: () => 0,

@@ -278,4 +278,62 @@ module.exports = async function run() {
       && catchBlock.indexOf('showError') < 0,
       'a refresh that could not reach the server disturbs a usable screen');
   });
+
+  section('Three risks the cache introduced, and what closes them:');
+
+  await check('a locked inspection is announced even to someone typing', async () => {
+    // The first version held the status back along with the answers whenever
+    // anything was unsaved, which got it backwards. Someone who has started
+    // typing is exactly who most needs to know the inspection was locked while
+    // they were reading it — otherwise they keep typing into a screen that says
+    // draft and every save fails, citing a status they cannot see.
+    const fs = require('fs');
+    const path = require('path');
+    const source = withoutComments(fs.readFileSync(
+      path.join(__dirname, '..', 'js', 'pages.js'), 'utf8'));
+    const revalidate = source.slice(
+      source.indexOf('function _revalidate('),
+      source.indexOf('\n}', source.indexOf('function _revalidate(')));
+
+    const status = revalidate.indexOf('statusChanged');
+    const guard = revalidate.indexOf('draftSectionIds');
+    assert(status >= 0, 'the status is no longer handled separately');
+    assert(status < guard,
+      'the status is still held back behind the unsaved-work guard');
+  });
+
+  await check('a tenant does not read what staff left on the device', async () => {
+    // getInspection strips tenantTokenHash, currentNonce and createdBy from a
+    // tenant's copy. Reading the cache regardless would hand back whatever the
+    // last viewer stored — and the device the landlord passes across to be
+    // signed on is the landlord's own.
+    const fs = require('fs');
+    const path = require('path');
+    const source = withoutComments(fs.readFileSync(
+      path.join(__dirname, '..', 'js', 'pages.js'), 'utf8'));
+    const ensure = source.slice(
+      source.indexOf('async function ensureInspection('),
+      source.indexOf('\n}', source.indexOf('async function ensureInspection(')));
+
+    assert(/authMode === 'tenant'/.test(ensure),
+      'the cache is read without asking who is looking');
+    assert(ensure.indexOf("authMode === 'tenant'") < ensure.indexOf('inspectionCache.read'),
+      'the check comes after the read, which is too late');
+  });
+
+  await check('and nothing writes a tenant copy into it either', async () => {
+    const fs = require('fs');
+    const path = require('path');
+    const source = withoutComments(fs.readFileSync(
+      path.join(__dirname, '..', 'js', 'pages.js'), 'utf8'));
+
+    // Every write must be behind the same question. One that is not would put a
+    // tenant's stripped payload where staff will read it back, which is the
+    // same fault in the other direction.
+    const writes = source.split('inspectionCache.write(').length - 1;
+    const guarded = source.split(/authMode !== 'tenant'\) inspectionCache\.write\(/).length - 1;
+    assert(writes > 0, 'nothing writes to the cache, so this checks nothing');
+    assert(writes === guarded,
+      `${writes - guarded} of ${writes} cache writes are not asking who is looking`);
+  });
 };
