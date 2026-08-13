@@ -164,7 +164,10 @@ const InspectionService = (function () {
       fileName: a.fileName,
       mimeType: a.mimeType,
       caption: a.caption,
-      thumbnailUrl: DriveService.getThumbnailUrl(a.driveFileId),
+      // No thumbnailUrl. It was a drive.google.com link the browser fetched
+      // with its own Google session, which is not the rule this app runs on —
+      // see AttachmentService.getSectionThumbs, which the editor calls once per
+      // section instead.
       uploadedAt: a.uploadedAt,
     }));
 

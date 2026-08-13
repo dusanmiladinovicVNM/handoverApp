@@ -254,8 +254,33 @@ const DriveService = (function () {
     return _file(() => DriveApp.getFileById(fileId).getSize());
   }
 
-  function getThumbnailUrl(fileId) {
-    return `https://drive.google.com/thumbnail?id=${fileId}&sz=w400`;
+  /**
+   * A small preview of one photo, read here rather than by the browser.
+   *
+   * This replaces a `drive.google.com/thumbnail?id=…` URL put straight into an
+   * `<img>`. That URL is fetched by the browser with whatever Google account it
+   * happens to be signed into, which for this app is the wrong question twice
+   * over: a tenant has no Google account at all, and an administrator was
+   * given rights in *this* app, not in Drive. The first admin added that way
+   * opened an inspection and saw a broken-image icon where the meter reading
+   * photograph should have been.
+   *
+   * Drive's own thumbnail is a few kilobytes rather than the megapixels the
+   * phone uploaded, which is what makes serving them from here affordable at
+   * all. It returns null for a file Drive has not made one for — a format it
+   * does not preview, or one uploaded moments ago — and that is reported as
+   * absence rather than failure, because a missing preview is not a missing
+   * photograph.
+   */
+  function getThumbnailBytes(fileId) {
+    return _file(function () {
+      const blob = DriveApp.getFileById(fileId).getThumbnail();
+      if (!blob) return null;
+      return {
+        mimeType: blob.getContentType() || 'image/jpeg',
+        base64Data: Utilities.base64Encode(blob.getBytes()),
+      };
+    });
   }
 
   return {
@@ -269,7 +294,7 @@ const DriveService = (function () {
     saveJsonFile,
     getFileBlob,
     getFileSize,
-    getThumbnailUrl,
+    getThumbnailBytes,
     getStats,
   };
 })();

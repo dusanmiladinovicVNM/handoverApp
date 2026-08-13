@@ -16,6 +16,7 @@
 import { h, escapeHtml, debounce } from './utils/dom.js';
 import { statusLabel, statusBadgeClass } from './utils/format.js';
 import { compressImage } from './utils/image.js';
+import * as thumbs from './utils/thumbs.js';
 import { api } from './api.js';
 import { toastError, toastSuccess, confirm } from './ui.js';
 import { addAttachmentLocally, removeAttachmentLocally, getState, patchAnswer } from './state.js';
@@ -368,8 +369,19 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
     const live = (getState().attachments || []).filter(a => a.sectionId === sectionId && a.itemId === itemId);
 
     for (const att of live) {
+      // What the device holds: a data URL, null for "Drive has no preview of
+      // this one", or undefined for "not fetched yet". The three are different
+      // and the screen used to show the same broken icon for all of them.
+      const preview = thumbs.peek(att.attachmentId);
       const item = h('div', { class: 'image-grid__item' },
-        h('img', { src: att.thumbnailUrl, alt: att.caption || '', loading: 'lazy' }),
+        preview
+          ? h('img', { src: preview, alt: att.caption || '', loading: 'lazy' })
+          : h('div', {
+              class: 'image-grid__item-placeholder',
+              title: preview === null
+                ? 'The photograph is stored; there is no preview of it.'
+                : 'Loading preview…',
+            }, preview === null ? '🖼' : '…'),
         disabled ? null : h('button', {
           class: 'image-grid__item-remove',
           onClick: async () => {
@@ -377,6 +389,7 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
             if (!ok) return;
             try {
               await api.deleteAttachment(inspectionId, att.attachmentId);
+              thumbs.forget(att.attachmentId);
               removeAttachmentLocally(att.attachmentId);
               if (onRemove) onRemove(att);
               rebuild();
@@ -431,12 +444,17 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
         width: compressed.width,
         height: compressed.height,
       });
+      // The picture is already here, read off the camera a moment ago. Keeping
+      // it beats asking the server for a copy: it is instant, it works offline,
+      // and Drive has usually not finished making a preview of a file uploaded
+      // this second.
+      thumbs.remember(result.attachmentId, `data:image/jpeg;base64,${compressed.base64Data}`);
+
       const attachment = {
         attachmentId: result.attachmentId,
         sectionId, itemId,
         fileId: result.fileId,
         fileName: result.fileName,
-        thumbnailUrl: result.thumbnailUrl,
       };
       addAttachmentLocally(attachment);
       if (onAdd) onAdd(attachment);

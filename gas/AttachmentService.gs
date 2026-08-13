@@ -89,11 +89,13 @@ const AttachmentService = (function () {
       sizeBytes,
     });
 
+    // No thumbnail here. The screen that just uploaded already holds the
+    // picture it read off the camera, and showing that is both instant and a
+    // truer confirmation than a copy fetched back from Drive.
     return {
       attachmentId,
       fileId: saved.fileId,
       fileName: saved.fileName,
-      thumbnailUrl: DriveService.getThumbnailUrl(saved.fileId),
     };
   }
 
@@ -131,5 +133,55 @@ const AttachmentService = (function () {
     return { attachmentId: data.attachmentId, deleted: true };
   }
 
-  return { uploadAttachment, deleteAttachment };
+
+  /**
+   * Previews for the photographs in one section.
+   *
+   * Replaces a Drive URL that the browser fetched for itself. That URL asked
+   * Drive whether the *viewer's Google account* may read the file, which is a
+   * question with no useful answer here: a tenant has no Google account, and an
+   * administrator was given rights in this app rather than in Drive. The first
+   * one added that way opened an inspection and found a broken-image icon where
+   * the meter reading should have been — not a future risk, a defect in front
+   * of a user.
+   *
+   * A section rather than a photograph, because a request to this backend costs
+   * about three seconds whatever it carries; five separate ones for five photos
+   * would be worse than the bug. Drive's own thumbnails are a few kilobytes
+   * each, so a section fits comfortably in one reply.
+   *
+   * A photo Drive has no preview for comes back with base64Data null. That is
+   * absence, not failure: the photograph is there and downloadable, and the one
+   * thing this must not do is imply it was lost.
+   */
+  function getSectionThumbs(authCtx, data) {
+    Utils.requireField(data, 'inspectionId', 'string');
+    Utils.requireField(data, 'sectionId', 'string');
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
+
+    const wanted = SheetService.getAttachmentsForInspection(data.inspectionId, false)
+      .filter(a => a.sectionId === data.sectionId);
+
+    const thumbs = wanted.map(function (a) {
+      let thumb = null;
+      try {
+        thumb = DriveService.getThumbnailBytes(a.driveFileId);
+      } catch (e) {
+        // One unreadable file must not cost the section its other previews.
+        Utils.log('WARN', 'Could not read a thumbnail', {
+          attachmentId: a.attachmentId, fileId: a.driveFileId, error: e.message,
+        });
+      }
+      return {
+        attachmentId: a.attachmentId,
+        itemId: a.itemId,
+        mimeType: thumb ? thumb.mimeType : '',
+        base64Data: thumb ? thumb.base64Data : null,
+      };
+    });
+
+    return { inspectionId: data.inspectionId, sectionId: data.sectionId, thumbs };
+  }
+
+  return { uploadAttachment, deleteAttachment, getSectionThumbs };
 })();

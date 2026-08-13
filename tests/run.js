@@ -15,6 +15,7 @@ const suites = [
   ['Sheet reads and cache', require('./sheet-cache.test')],
   ['Sheet timing counters', require('./sheet-stats.test')],
   ['Cell values', require('./cell-values.test')],
+  ['Photo previews', require('./thumbnails.test')],
   ['Batch reads', require('./batch-read.test')],
   ['Section answers', require('./section-answers.test')],
   ['Config cache', require('./config-cache.test')],
