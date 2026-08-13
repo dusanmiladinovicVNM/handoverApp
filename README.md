@@ -130,33 +130,25 @@ Existing inspections keep their original schema (snapshot at creation). New insp
 
 **Backups**: Drive auto-versions Sheets. Each finalized inspection also has a JSON snapshot in its output folder.
 
-**Drive sharing**: `/Inspections` cannot be made private yet, and it is worth
-being exact about why, because the temptation is to close it as soon as the
-report stops being a Drive link.
+**Drive sharing**: `/Inspections` should be private to the account that
+deployed the script. Nothing in the app reaches Drive from the browser any more:
 
-The final report is fetched through the `downloadPdf` action now, which applies
-the same access rule as every other inspection handler — admin, the assigned
-inspector, or the tenant token issued for that one inspection. So the app no
-longer *hands out* a Drive URL for it.
+- the final report comes through the `downloadPdf` action
+- photo previews come through `getSectionThumbs`
 
-But photo thumbnails still come straight from Drive: `getThumbnailUrl` returns
-`drive.google.com/thumbnail?id=…`, and the browser fetches that with whatever
-Google account it happens to have. A tenant has none. Close the folder and every
-photograph in every inspection stops rendering — for the tenant certainly, and
-for staff not signed into an account with access.
+Both apply the same rule as every other inspection handler — admin, the assigned
+inspector, or the tenant token issued for that one inspection — and both are
+read server-side by the deploying account, so the caller needs no Drive access
+of their own.
 
-Photos and the report are siblings under the same inspection folder, and Drive
-sharing is inherited, so there is no closing one without the other:
+That was the point. An administrator is given rights in *this* app, and a
+tenant has no Google account at all; a `drive.google.com` URL asks neither
+question. The first admin added without Drive access opened an inspection and
+found a broken-image icon where a meter reading photograph should have been.
 
-```
-/Inspections/<year>/<inspectionId>/photos/   ← thumbnails, fetched by the browser
-/Inspections/<year>/<inspectionId>/output/   ← the report, fetched through the API
-```
-
-**So the sequence is: move thumbnails through the API first, then close the
-folder.** Until then the file id remains the only protection on anything in
-there, which is what the `downloadPdf` work exists to end — it has removed the
-app as a source of those ids, not the exposure itself.
+Sharing the folder with "anyone with the link" would undo it: a Drive file id
+is not secret, and anyone holding one would read a signed report, or a
+photograph from someone's home, without signing in at all.
 
 **Quota**: free Google account has Apps Script daily limits. At ~50 inspections/month, you're nowhere near them.
 
@@ -171,7 +163,6 @@ app as a source of those ids, not the exposure itself.
 - **No email notifications**: tenant link must be shared manually (copied + pasted into email/SMS).
 - **No witness / agent roles in MVP**: schema supports them but signature flow expects only `landlord` + `tenant`.
 - **No granular admin roles**: any email in `ADMIN_EMAILS` is full admin.
-- **Photo thumbnails still come straight from Drive**: `getThumbnailUrl` returns a `drive.google.com/thumbnail?id=…` URL, so photos only render while `/Inspections` is readable without signing in. The final report no longer works this way — it goes through `downloadPdf` — but the folder cannot be closed until the thumbnails follow, because both live under it. See **Drive sharing** in Operational Notes for the order this has to happen in.
 
 These are deliberate scope cuts. Adding them later requires additive changes only — no schema migration.
 

@@ -176,6 +176,11 @@ export const api = {
   uploadAttachment: (data) => call('uploadAttachment', data, API_TIMEOUT_UPLOAD),
   deleteAttachment: (inspectionId, attachmentId) =>
     call('deleteAttachment', { inspectionId, attachmentId }),
+  // Previews for a whole section, because a request here costs about three
+  // seconds whatever it carries and five photos would otherwise be five of
+  // them. Drive's own thumbnails are a few kilobytes each.
+  getSectionThumbs: (inspectionId, sectionId) =>
+    call('getSectionThumbs', { inspectionId, sectionId }),
 
   // --- Signatures ---
   saveSignature: (data) => call('saveSignature', data, API_TIMEOUT_UPLOAD),

@@ -35,6 +35,7 @@ import { AUTOSAVE_DEBOUNCE_MS } from './config.js';
 import { readJson, writeJson, CACHE_KEYS } from './utils/store.js';
 import { rememberDraft, forgetDraft, readDraft, draftSectionIds } from './utils/drafts.js';
 import { track as trackSave, settled as savesSettled } from './utils/pending-saves.js';
+import * as thumbs from './utils/thumbs.js';
 import { base64ToBlob, saveBlob } from './utils/download.js';
 import {
   login as authLogin, setPassword as authSetPassword,
@@ -1920,6 +1921,30 @@ export async function pageInspectionSection({ params }) {
   }
 
   render();
+
+  // Photo previews for this section, once, in the background.
+  //
+  // Not awaited: the section is usable without them, and a request here costs
+  // about three seconds. Asked for the whole section rather than per photo for
+  // the same reason — five images would otherwise be five round trips.
+  //
+  // Only when something is actually missing. A section whose photos were all
+  // taken on this device already has them, and re-fetching would be three
+  // seconds spent replacing a picture with a copy of itself.
+  (function loadThumbs() {
+    const ids = (getState().attachments || [])
+      .filter(a => a.sectionId === sectionId)
+      .map(a => a.attachmentId);
+    if (ids.length === 0 || !thumbs.needsLoading(ids)) return;
+
+    thumbs.loadSection(inspectionId, sectionId, api.getSectionThumbs)
+      .then(() => { if (cardsContainer && cardsContainer.parentNode) rebuildContent(); })
+      .catch(() => {
+        // Left as they are — "loading" rather than "no preview" — because a
+        // failed request says nothing about whether a preview exists, and
+        // reopening the section should try again.
+      });
+  })();
 
   // Said out loud, and sent straight away. Restoring silently would leave
   // someone looking at answers with no way to tell whether they are safe —
