@@ -32,6 +32,7 @@ const suites = [
   ['Account administration', require('./user-admin.test')],
   ['Local drafts', require('./drafts.test')],
   ['Pending saves', require('./pending-saves.test')],
+  ['Remembered inspections', require('./inspection-cache.test')],
   ['API timeouts', require('./api-timeouts.test')],
   ['Restoring a session', require('./session-restore.test')],
   ['Inspection lifecycle', require('./lifecycle.test')],

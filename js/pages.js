@@ -34,8 +34,11 @@ import {
 import { AUTOSAVE_DEBOUNCE_MS } from './config.js';
 import { readJson, writeJson, CACHE_KEYS } from './utils/store.js';
 import { rememberDraft, forgetDraft, readDraft, draftSectionIds } from './utils/drafts.js';
-import { track as trackSave, settled as savesSettled } from './utils/pending-saves.js';
+import {
+  track as trackSave, settled as savesSettled, outstanding as outstandingSaves,
+} from './utils/pending-saves.js';
 import * as thumbs from './utils/thumbs.js';
+import * as inspectionCache from './utils/inspection-cache.js';
 import { base64ToBlob, saveBlob } from './utils/download.js';
 import {
   login as authLogin, setPassword as authSetPassword,
@@ -43,6 +46,86 @@ import {
 } from './auth.js';
 
 const root = () => document.getElementById('app-root');
+
+
+/**
+ * Have the inspection on screen, from the device if it is there.
+ *
+ * Opening one was measured at 3 329 ms, of which about 2 900 is transport — the
+ * /exec redirect, a body from another host, a cold script — against 448 ms of
+ * server work. No amount of backend work gets this under three seconds. The
+ * only way past it is to draw before asking.
+ *
+ * So: a remembered copy is drawn immediately and a fresh one is fetched behind
+ * it. Nothing is *decided* from the remembered copy. Every write still goes to
+ * the server, which re-reads the row — a save sends the revision it read and is
+ * refused with CONFLICT if the section moved on, locking re-validates every
+ * required item, signing and unlocking check the status. The machinery that
+ * catches a stale screen was built before this and is not being invented to
+ * excuse it.
+ *
+ * The one thing worth interrupting for is a status change. Answers arriving
+ * quietly is fine; discovering that what you are about to edit has been locked,
+ * or signed, is not — so that says so out loud and redraws.
+ *
+ * @returns true when there is something to draw, false when the caller has
+ *          already been shown an error and should stop.
+ */
+async function ensureInspection(inspectionId, onRefreshed) {
+  const held = getState().inspection;
+  if (held && held.inspectionId === inspectionId) return true;
+
+  const remembered = await inspectionCache.read(inspectionId);
+  if (remembered && remembered.inspection) {
+    setInspectionData(remembered);
+    _revalidate(inspectionId, remembered.inspection.status, onRefreshed);
+    return true;
+  }
+
+  showSpinner('Loading inspection…');
+  try {
+    const data = await api.getInspection(inspectionId);
+    setInspectionData(data);
+    inspectionCache.write(inspectionId, data);
+    return true;
+  } catch (e) {
+    showError('Could not load inspection', e.message);
+    return false;
+  }
+}
+
+/** Fetch behind a screen that is already drawn, and correct it if it was wrong. */
+function _revalidate(inspectionId, shownStatus, onRefreshed) {
+  api.getInspection(inspectionId)
+    .then((fresh) => {
+      inspectionCache.write(inspectionId, fresh);
+      // Only if the person is still looking at this inspection. They may have
+      // gone back to the list, or into another one, in the seconds this took.
+      const current = getState().inspection;
+      if (!current || current.inspectionId !== inspectionId) return;
+
+      // And only if nothing is outstanding. setInspectionData replaces the
+      // answers wholesale, so applying a reply that left the server before
+      // someone started typing would overwrite what they typed — with an older
+      // copy, silently, while they were looking at it. The cache is still
+      // updated above; the screen picks it up the next time it opens clean.
+      if (draftSectionIds(inspectionId).length > 0 || outstandingSaves() > 0) return;
+
+      setInspectionData(fresh);
+      if (onRefreshed) onRefreshed(fresh);
+
+      if (fresh.inspection && fresh.inspection.status !== shownStatus) {
+        // Said out loud because it changes what may be done here, and the
+        // screen was drawn on the old answer a moment ago.
+        toastWarning(`This inspection is now ${statusLabel(fresh.inspection.status)}.`);
+      }
+    })
+    .catch(() => {
+      // Left as it is. The screen shows the last thing the server said, which
+      // is the best available answer when the server cannot be reached — and
+      // every write from here still has to get past it.
+    });
+}
 
 /**
  * Put the inspection a mutation just changed back into state.
@@ -62,6 +145,9 @@ const root = () => document.getElementById('app-root');
 async function applyMutationState(result, inspectionId) {
   const data = (result && result.state) || await api.getInspection(inspectionId);
   setInspectionData(data);
+  // Remembered too, so the next open draws the inspection as it is now rather
+  // than as it was before it was locked, signed or reassigned.
+  inspectionCache.write(inspectionId, data);
   return data;
 }
 
@@ -1540,15 +1626,7 @@ export async function pageInspectionHome({ params }) {
   // Safe because the pages that change an inspection refresh it themselves:
   // saving, locking, unlocking, signing and finalising all call
   // setInspectionData with the server's reply.
-  if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading inspection…');
-    try {
-      const data = await api.getInspection(inspectionId);
-      setInspectionData(data);
-    } catch (e) {
-      return showError('Could not load inspection', e.message);
-    }
-  }
+  if (!await ensureInspection(inspectionId, () => render())) return;
 
   function render() {
     const state = getState();
@@ -1664,15 +1742,7 @@ export async function pageInspectionSection({ params }) {
   const sectionId = params.sectionId;
 
   // Ensure inspection is loaded (after refresh on this URL)
-  if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading…');
-    try {
-      const data = await api.getInspection(inspectionId);
-      setInspectionData(data);
-    } catch (e) {
-      return showError('Could not load inspection', e.message);
-    }
-  }
+  if (!await ensureInspection(inspectionId, () => render())) return;
 
   const state = getState();
   const section = (state.schema.sections || []).find(s => s.id === sectionId);
@@ -1993,15 +2063,7 @@ function collectTriggerFieldIds(schema) {
 export async function pageReview({ params }) {
   const inspectionId = params.id;
 
-  if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading…');
-    try {
-      const data = await api.getInspection(inspectionId);
-      setInspectionData(data);
-    } catch (e) {
-      return showError('Could not load inspection', e.message);
-    }
-  }
+  if (!await ensureInspection(inspectionId, () => render())) return;
 
   const schema = getState().schema;
 
@@ -2152,15 +2214,7 @@ export async function pageReview({ params }) {
 export async function pageSign({ params }) {
   const inspectionId = params.id;
 
-  if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading…');
-    try {
-      const data = await api.getInspection(inspectionId);
-      setInspectionData(data);
-    } catch (e) {
-      return showError('Could not load inspection', e.message);
-    }
-  }
+  if (!await ensureInspection(inspectionId, () => render())) return;
 
   const state = getState();
   const insp = state.inspection;
@@ -2470,14 +2524,7 @@ export async function pageSuccess({ params }) {
   // reached straight after signing or finalising, which have just put the
   // server's own copy into state — fetching it again was a guaranteed round
   // trip for something already in hand.
-  if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading…');
-    try {
-      setInspectionData(await api.getInspection(inspectionId));
-    } catch (e) {
-      return showError('Could not load inspection', e.message);
-    }
-  }
+  if (!await ensureInspection(inspectionId, () => render())) return;
   const isStaff = getState().authMode === 'user';
 
   let finalizing = false;
@@ -2610,15 +2657,7 @@ export async function pageAdminDetail({ params }) {
   // Same reuse as pageInspectionHome. This page is most often reached from the
   // list and left again immediately, which is exactly the pattern that made
   // every click cost a fetch.
-  if (!getState().inspection || getState().inspection.inspectionId !== inspectionId) {
-    showSpinner('Loading…');
-    try {
-      const data = await api.getInspection(inspectionId);
-      setInspectionData(data);
-    } catch (e) {
-      return showError('Could not load inspection', e.message);
-    }
-  }
+  if (!await ensureInspection(inspectionId, () => render())) return;
 
   let downloading = false;
   const setDownloading = (v) => { downloading = v; render(); };
