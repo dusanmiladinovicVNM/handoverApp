@@ -266,6 +266,16 @@
  * preview of. Both used to render as the browser's broken-image icon, which
  * says "this is gone" about a file that is not.
  */
+.image-grid__item--tappable {
+  cursor: zoom-in;
+}
+
+/* The picture is the affordance; nothing else about the tile suggests one. */
+.image-grid__item--tappable:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .image-grid__item-placeholder {
   width: 100%;
   height: 100%;
@@ -648,4 +658,78 @@
 
 .form-hint {
   margin-top: var(--space-1);
+}
+
+
+/* ============================================================
+   Photo viewer
+   ============================================================ */
+
+/**
+ * A photograph on its own, over everything else.
+ *
+ * Tapping a thumbnail used to do nothing, which on a phone reads as an app that
+ * has stopped responding — and the photographs are what a handover report is
+ * for. A meter reading nobody can read is not evidence.
+ */
+.photo-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Nearly black rather than black: the edge of a dark photograph stays
+     findable against it. */
+  background: rgba(17, 17, 17, 0.94);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.photo-viewer__img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/**
+ * The preview, standing in until the full picture arrives. Scaled well past its
+ * own resolution, so it is smoothed rather than left as visible squares — it is
+ * there to answer "which photograph is this", not to be looked at closely.
+ */
+.photo-viewer__img--preview {
+  filter: blur(1px);
+}
+
+.photo-viewer__status {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  text-align: center;
+  color: #ffffff;
+  font-size: 0.875rem;
+  padding: 0 1rem;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.photo-viewer__close {
+  position: absolute;
+  top: calc(0.5rem + env(safe-area-inset-top));
+  right: calc(0.5rem + env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #ffffff;
+  font-size: 1.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.photo-viewer__close:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
 }

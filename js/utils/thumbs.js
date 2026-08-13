@@ -55,6 +55,7 @@ export function remember(attachmentId, dataUrl) {
 
 export function forget(attachmentId) {
   _byId.delete(attachmentId);
+  _full.delete(attachmentId);
 }
 
 /**
@@ -97,8 +98,76 @@ export function needsLoading(attachmentIds) {
   return (attachmentIds || []).some(id => !_byId.has(id));
 }
 
+
+// --- Full-size pictures ---
+
+/**
+ * The last few photographs looked at, at full size.
+ *
+ * Bounded, unlike the previews. A preview is a few kilobytes and an inspection
+ * has tens of them; a full picture is a few hundred, and thirty of those held
+ * at once is most of what a phone will give a tab before it starts discarding
+ * things — including, on iOS, the tab itself.
+ *
+ * Small on purpose. It exists so that going back to a photograph just looked
+ * at, or just taken, is instant; it is not trying to be an offline copy of the
+ * inspection.
+ */
+const FULL_LIMIT = 5;
+const _full = new Map();
+
+function _keepFull(attachmentId, dataUrl) {
+  // Re-inserted so it counts as most recent — a Map iterates in insertion
+  // order, which is what makes the oldest key the first one.
+  _full.delete(attachmentId);
+  _full.set(attachmentId, dataUrl);
+  while (_full.size > FULL_LIMIT) {
+    _full.delete(_full.keys().next().value);
+  }
+}
+
+export function peekFull(attachmentId) {
+  return _full.get(attachmentId);
+}
+
+/** Keep a picture the device already has — the one the camera just took. */
+export function rememberFull(attachmentId, dataUrl) {
+  if (attachmentId && dataUrl) _keepFull(attachmentId, dataUrl);
+}
+
+/**
+ * Fetch one photograph at full size, once.
+ *
+ * Deduplicated like the sections, because a double tap is one gesture and
+ * should not be two requests of several hundred kilobytes.
+ */
+export async function loadFull(inspectionId, attachmentId, fetcher) {
+  const held = _full.get(attachmentId);
+  if (held) return held;
+
+  const key = `full:${attachmentId}`;
+  if (_inFlight.has(key)) return _inFlight.get(key);
+
+  const pending = (async () => {
+    try {
+      const res = await fetcher(inspectionId, attachmentId);
+      const url = `data:${res.mimeType || 'image/jpeg'};base64,${res.base64Data}`;
+      _keepFull(attachmentId, url);
+      return url;
+    } finally {
+      // Cleared either way: a failed fetch must be retryable, and a successful
+      // one is in the map now and will not come back here.
+      _inFlight.delete(key);
+    }
+  })();
+
+  _inFlight.set(key, pending);
+  return pending;
+}
+
 /** For tests, and for signing out. */
 export function clear() {
   _byId.clear();
+  _full.clear();
   _inFlight.clear();
 }

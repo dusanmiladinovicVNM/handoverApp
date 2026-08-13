@@ -183,5 +183,44 @@ const AttachmentService = (function () {
     return { inspectionId: data.inspectionId, sectionId: data.sectionId, thumbs };
   }
 
-  return { uploadAttachment, deleteAttachment, getSectionThumbs };
+
+  /**
+   * One photograph at full size, for someone who tapped it to look closer.
+   *
+   * A separate action from the previews on purpose. A section's previews are a
+   * few kilobytes each and fetched together the moment the screen opens; this
+   * is hundreds of kilobytes and fetched only when asked for, so folding it
+   * into getSectionThumbs would make opening any section pay for pictures
+   * nobody looked at.
+   */
+  function getAttachmentFile(authCtx, data) {
+    Utils.requireField(data, 'inspectionId', 'string');
+    Utils.requireField(data, 'attachmentId', 'string');
+    AuthService.requireInspectionAccess(authCtx, data.inspectionId);
+
+    const att = SheetService.getAttachment(data.attachmentId);
+    if (!att || att.deleted === true) {
+      throw new HandoverError('NOT_FOUND', 'Photograph not found.');
+    }
+    // Checked rather than assumed. requireInspectionAccess vouches for the
+    // inspection named in the request, not for an attachment id that happens to
+    // be passed alongside it — and those are two different things when the id
+    // comes from the caller.
+    if (att.inspectionId !== data.inspectionId) {
+      throw new HandoverError('FORBIDDEN', 'That photograph belongs to another inspection.');
+    }
+
+    const file = DriveService.getFileBytes(
+      att.driveFileId, Config.getMaxPdfDownloadMb() * 1024 * 1024);
+
+    return {
+      attachmentId: att.attachmentId,
+      fileName: att.fileName,
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes,
+      base64Data: file.base64Data,
+    };
+  }
+
+  return { uploadAttachment, deleteAttachment, getSectionThumbs, getAttachmentFile };
 })();
