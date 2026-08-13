@@ -28,23 +28,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { section, check, assert } = require('./appsscript-stubs');
+const { section, check, assert, withoutComments } = require('./appsscript-stubs');
 
 const ROOT = path.join(__dirname, '..');
-
-/**
- * Source with its comments taken out.
- *
- * Line comments are only removed when the `//` does not follow a colon, which
- * is the whole difficulty: a naive stripper truncates `https://…` at its own
- * slashes and would hide the very URL being hunted. Crude, and it does not need
- * to be better — it is separating prose from code, not parsing JavaScript.
- */
-function withoutComments(source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-}
 
 /** Every shipped source file, so a leftover link cannot hide in one of them. */
 function sourceFiles() {

@@ -9,6 +9,7 @@
  */
 
 import { clearAllDrafts } from './drafts.js';
+import { clearAll as clearInspections } from './inspection-cache.js';
 
 export function readJson(key) {
   try {
@@ -45,4 +46,10 @@ export function clearCaches() {
   // cannot be listed above. They hold the same kind of data and go the same
   // way — see utils/drafts.js for what that costs.
   clearAllDrafts();
+  // And the remembered inspections, which are the largest thing on the device
+  // naming real people: addresses, tenant names, telephone numbers. A device
+  // may be shared, and the next person to sign in has no business seeing the
+  // last one's work. Not awaited — sign-out should not wait on a database, and
+  // nothing here is readable again without a session anyway.
+  clearInspections();
 }

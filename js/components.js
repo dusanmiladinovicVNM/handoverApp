@@ -20,7 +20,10 @@ import * as thumbs from './utils/thumbs.js';
 import { openPhoto } from './photo-viewer.js';
 import { api } from './api.js';
 import { toastError, toastSuccess, confirm } from './ui.js';
-import { addAttachmentLocally, removeAttachmentLocally, getState, patchAnswer } from './state.js';
+import {
+  addAttachmentLocally, removeAttachmentLocally, getState, patchAnswer,
+  setSectionRevision,
+} from './state.js';
 import { MAX_ATTACHMENTS_PER_ITEM, AUTOSAVE_DEBOUNCE_MS } from './config.js';
 
 // ============================================================
@@ -406,7 +409,10 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
             const ok = await confirm({ title: 'Remove photo?', message: 'This cannot be undone.', confirmLabel: 'Remove', danger: true });
             if (!ok) return;
             try {
-              await api.deleteAttachment(inspectionId, att.attachmentId);
+              const removed = await api.deleteAttachment(inspectionId, att.attachmentId);
+              if (removed && typeof removed.revision === 'number') {
+                setSectionRevision(sectionId, removed.revision);
+              }
               thumbs.forget(att.attachmentId);
               removeAttachmentLocally(att.attachmentId);
               if (onRemove) onRemove(att);
@@ -478,6 +484,13 @@ export function imageUploader({ inspectionId, sectionId, itemId, attachments, ma
         fileId: result.fileId,
         fileName: result.fileName,
       };
+      // Writing the photo count moved the section's revision on. Without this
+      // the next autosave sends the one read before the upload and comes back
+      // refused, in a message about somebody else editing — on the most
+      // ordinary sequence there is: take a photograph, then type the note.
+      if (typeof result.revision === 'number') {
+        setSectionRevision(sectionId, result.revision);
+      }
       addAttachmentLocally(attachment);
       if (onAdd) onAdd(attachment);
       rebuild();

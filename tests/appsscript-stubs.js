@@ -278,6 +278,28 @@ function check(name, fn) {
   return undefined;
 }
 
+
+/**
+ * Source with its comments taken out.
+ *
+ * For the checks that read the shipped source rather than run it. The rule such
+ * a check wants is almost always about code, and matching prose instead is how
+ * two of them went wrong here: one failed on the comments explaining why a URL
+ * had been removed, and one read the word setInspectionData out of a comment
+ * warning about setInspectionData and concluded the guard below it ran too
+ * late.
+ *
+ * Line comments are only removed when the `//` does not follow a colon, which
+ * is the whole difficulty: a naive stripper truncates `https://…` at its own
+ * slashes and hides the very URL being hunted. Crude, and it does not need to
+ * be better — it separates prose from code, it does not parse JavaScript.
+ */
+function withoutComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+}
+
 function assert(condition, message) {
   if (!condition) throw new Error(message || 'assertion failed');
 }
@@ -301,5 +323,6 @@ function summary() {
 }
 
 module.exports = {
+  withoutComments,
   createEnvironment, section, check, assert, expectError, summary, state,
 };

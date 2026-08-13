@@ -735,11 +735,22 @@ const SheetService = (function () {
    * with no answer yet gets one: the count is worth keeping even when nothing
    * has been typed.
    */
+  /**
+   * Returns the section's new revision, which the caller has to pass on.
+   *
+   * Writing the count bumps the revision like any other write, and the editor
+   * only ever learns a new one from a saveSection reply. So uploading a photo
+   * moved the section on without telling the screen, and the next autosave sent
+   * a revision the server had already left behind — reporting a conflict, in a
+   * message about somebody else editing, on the most ordinary sequence in the
+   * app: take a photograph, then type the note that goes with it.
+   */
   function recomputeAttachmentCount(inspectionId, sectionId, itemId) {
     const count = countAttachmentsForItem(inspectionId, sectionId, itemId);
     const items = {};
     items[itemId] = { attachmentCount: count };
-    upsertSectionAnswers(inspectionId, sectionId, items, 'system', null);
+    const result = upsertSectionAnswers(inspectionId, sectionId, items, 'system', null);
+    return { count: count, revision: result.revision };
   }
 
   // ============================================================
