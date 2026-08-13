@@ -161,6 +161,18 @@ const Config = (function () {
     return getNumber('maxAttachmentsPerInspection', 80);
   }
 
+  /**
+   * The largest single photograph uploadAttachment will accept, decoded.
+   *
+   * The client compresses to 1600px at quality 0.75, which lands well under a
+   * megabyte, so eight is roughly ten times a normal photo — generous enough
+   * that no honest upload meets it, small enough that a request cannot spend
+   * the execution's memory before anything has looked at it.
+   */
+  function getMaxAttachmentMb() {
+    return getNumber('maxAttachmentMb', 8);
+  }
+
   function getImageMaxDimPx() {
     return getNumber('imageMaxDimPx', 1600);
   }
@@ -301,6 +313,7 @@ const Config = (function () {
     invalidateCache,
     getDefaultTokenTtlHours,
     getMaxAttachmentsPerItem,
+    getMaxAttachmentMb,
     getMaxAttachmentsPerInspection,
     getImageMaxDimPx,
     getImageJpegQuality,

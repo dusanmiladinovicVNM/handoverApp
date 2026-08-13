@@ -114,6 +114,29 @@ only to admins until someone assigns it.
 - `CONFLICT` — concurrent modification detected
 - `INTERNAL_ERROR` — uncaught exception
 
+### The `state` trailer
+
+Six actions that change an inspection's status carry the whole new state back
+under `data.state`, in exactly the shape `getInspection` returns:
+
+`createInspection`, `lockInspection`, `unlockInspection`, `assignInspection`,
+`saveSignature`, `finalizeInspection`.
+
+The point is that a request to this backend costs about three seconds whatever
+it carries, and every one of these was previously followed by a `getInspection`
+to find out what the app now looked like. Folding it in halves the wait on the
+transitions people notice most.
+
+`state` is best-effort. The write has already happened by the time it is
+assembled, so a failure to read the inspection back is logged and the key is
+left off rather than turning a successful mutation into an error the client
+cannot interpret. **A client must treat `state` as optional** and fall back to
+calling `getInspection` when it is absent.
+
+Actions that change content but not status — `saveSection`, `uploadAttachment`,
+`deleteAttachment` — do not carry `state`. They return the affected section's
+new `revision` instead, which is what the editor needs to keep saving.
+
 ---
 
 ## Endpoints — accounts and sessions
@@ -353,8 +376,9 @@ tenant token issued for this inspection.
         "kitchen_walls": { "value": "minor", "comment": "...", "attachmentCount": 2, "updatedAt": "..." }
       }
     },
+    "revisions": { "kitchen": 7, "bathroom": 2 },
     "attachments": [
-      { "attachmentId": "ATT-...", "sectionId": "kitchen", "itemId": "kitchen_walls", "fileId": "...", "fileName": "...", "thumbnailUrl": "..." }
+      { "attachmentId": "ATT-...", "sectionId": "kitchen", "itemId": "kitchen_walls", "fileId": "...", "fileName": "...", "mimeType": "image/jpeg", "caption": "", "uploadedAt": "..." }
     ],
     "signatures": [
       { "signatureId": "SIG-...", "signerRole": "landlord", "signerName": "...", "signedAt": "...", "signatureFileId": "...", "valid": true }
@@ -365,6 +389,18 @@ tenant token issued for this inspection.
 
 A non-admin caller — inspector or tenant — does not receive
 `tenantTokenHash`, `currentNonce` or `createdBy`.
+
+`revisions` carries each section's current revision number. A client that
+intends to save must keep the one it read and send it back as
+`expectedRevision`; see `saveSection`.
+
+There is no `thumbnailUrl` on an attachment. It used to be a
+`drive.google.com/thumbnail?id=…` link that the browser fetched with its own
+Google session, which asks Drive whether the *viewer's* Google account may read
+the file — a question with no useful answer here, since a tenant has no Google
+account and an administrator is granted rights in this app rather than in
+Drive. Previews come from `getSectionThumbs` and full images from
+`getAttachmentFile`, both of which read as the deploying account.
 
 ---
 
@@ -381,6 +417,7 @@ Upsert answers for one section. Idempotent.
   "data": {
     "inspectionId": "INS-2026-000123",
     "sectionId": "kitchen",
+    "expectedRevision": 7,
     "items": {
       "kitchen_walls": { "value": "minor", "comment": "Scratch visible" },
       "kitchen_sink":  { "value": true, "comment": "" }
@@ -389,18 +426,31 @@ Upsert answers for one section. Idempotent.
 }
 ```
 
+`expectedRevision` is the revision this client last read for the section, from
+`getInspection`'s `revisions` map or from an earlier reply. Omitting it saves
+unconditionally, which loses a concurrent edit silently — send it.
+
 **Response:**
 ```json
 {
   "ok": true,
   "data": {
     "savedItems": ["kitchen_walls", "kitchen_sink"],
+    "revision": 8,
     "updatedAt": "2026-04-03T10:30:00Z"
   }
 }
 ```
 
+`revision` is the section's new number — keep it for the next save.
+
+An item that is not in this section's schema is skipped and logged, not
+rejected — the rest of the save goes through.
+
 **Errors:** `INSPECTION_LOCKED` if status is `locked_for_signature` or beyond.
+`CONFLICT` if `expectedRevision` is not the section's current revision, meaning
+someone else saved between this client's read and its write. The client should
+re-read and offer the choice; it must not retry blindly.
 
 ---
 
@@ -436,14 +486,51 @@ Upload one photo. Image is base64-encoded in body.
     "attachmentId": "ATT-2026-04-03-a7f3b2",
     "fileId": "1mN2oP...",
     "fileName": "INS-2026-000123__kitchen__kitchen_walls__003.jpg",
-    "thumbnailUrl": "https://drive.google.com/thumbnail?id=1mN2oP..."
+    "sectionId": "kitchen",
+    "attachmentCount": 3,
+    "revision": 9
   }
 }
 ```
 
-**Validation:** rejects if `attachmentCount` for item exceeds `maxAttachmentsPerItem` (default 5), or total exceeds `maxAttachmentsPerInspection` (default 80).
+No thumbnail comes back. The screen that just uploaded already holds the picture
+it read off the camera, and showing that is both instant and a truer
+confirmation than a copy fetched back from Drive.
 
-**Frontend duty:** compress before upload. Server does NOT re-compress. Server enforces max payload size (~10MB safe limit) and rejects oversized.
+`revision` matters more than it looks. Storing a photo writes the new count into
+the section row, which moves the section's revision on — so an editor that did
+not take this number would send its stale one on the next autosave and be
+refused as somebody else's edit. Photograph, then type a note, is the most
+common thing anyone does in this app.
+
+**Validation**, in the order it runs, all of it before anything reaches Drive:
+
+1. `sectionId` must be a section in this inspection's schema — `INVALID_REQUEST`.
+2. `itemId` must be an item in that section — `INVALID_REQUEST`.
+3. That item must declare `attachments.enabled: true` — `VALIDATION_FAILED`.
+4. `mimeType` must be one of `image/jpeg`, `image/png`, `image/webp`.
+5. `base64Data` must be unpadded-by-whitespace base64 (length a multiple of 4).
+6. Decoded size must not exceed `maxAttachmentMb` (default 8).
+7. The file's opening bytes must match the declared `mimeType` — a JPEG must
+   start `FF D8 FF`, a PNG `89 50 4E 47 0D 0A 1A 0A`, a WEBP `RIFF` at 0 *and*
+   `WEBP` at 8. The mimeType is a string the caller chose; these are what
+   arrived.
+8. Count for the item must be below both the schema's `attachments.max` and
+   `maxAttachmentsPerItem` (default 5), whichever is lower.
+9. Count for the inspection must be below `maxAttachmentsPerInspection`
+   (default 80).
+
+Steps 1–3 used to be missing entirely, and the file was written to Drive before
+the sheet row. An upload naming a section that is not in the form therefore
+created a Drive file, wrote a row, and then had nowhere to count it: a
+photograph present in Drive, invisible in the app, absent from the report, with
+no error anywhere. Refusing first costs one cached schema read against a Drive
+write that is not undone.
+
+`sizeBytes` recorded in the sheet is the exact decoded length, computed from the
+base64 without decoding it.
+
+**Frontend duty:** compress before upload. The server does not re-compress.
 
 ---
 
@@ -459,8 +546,143 @@ Soft delete (sets `deleted = TRUE`, moves file to `_deleted` folder).
 
 **Response:**
 ```json
-{ "ok": true, "data": { "attachmentId": "ATT-...", "deleted": true } }
+{
+  "ok": true,
+  "data": {
+    "attachmentId": "ATT-...",
+    "deleted": true,
+    "sectionId": "kitchen",
+    "attachmentCount": 2,
+    "revision": 10
+  }
+}
 ```
+
+**Errors:** `NOT_FOUND` if the attachment does not exist. `FORBIDDEN` if it
+belongs to a different inspection than the one named in the request — checked
+rather than assumed, because `requireInspectionAccess` vouches for the
+inspection id, not for an attachment id passed alongside it. `INSPECTION_LOCKED`
+once the inspection is locked for signature or beyond: evidence cannot be
+removed from a document someone has signed, or is about to.
+
+---
+
+### `getSectionThumbs`
+Previews for every photograph in one section, as base64.
+
+**Auth:** `requireInspectionAccess`.
+
+**Request:**
+```json
+{
+  "action": "getSectionThumbs",
+  "auth": { ... },
+  "data": { "inspectionId": "INS-2026-000123", "sectionId": "kitchen" }
+}
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "data": {
+    "inspectionId": "INS-2026-000123",
+    "sectionId": "kitchen",
+    "thumbs": [
+      { "attachmentId": "ATT-...", "itemId": "kitchen_walls", "mimeType": "image/jpeg", "base64Data": "/9j/4AAQ..." },
+      { "attachmentId": "ATT-...", "itemId": "kitchen_sink", "mimeType": "", "base64Data": null }
+    ]
+  }
+}
+```
+
+A section rather than a photograph, deliberately. A request to this backend
+costs about three seconds whatever it carries, so five separate calls for five
+photographs would be worse than the problem this solves. Drive's thumbnails are
+a few kilobytes each, so a section fits comfortably in one reply.
+
+`base64Data: null` means Drive has no preview for that file — a format it cannot
+render, or one uploaded moments ago. **That is absence, not failure.** The
+photograph is there and `getAttachmentFile` will return it. A client must not
+render it as missing or broken.
+
+One unreadable file is logged and returned as `null`; it does not cost the
+section its other previews.
+
+---
+
+### `getAttachmentFile`
+One photograph at full size, for someone who tapped it to look closer.
+
+**Auth:** `requireInspectionAccess`.
+
+**Request:**
+```json
+{
+  "action": "getAttachmentFile",
+  "auth": { ... },
+  "data": { "inspectionId": "INS-2026-000123", "attachmentId": "ATT-..." }
+}
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "data": {
+    "attachmentId": "ATT-...",
+    "fileName": "INS-2026-000123__kitchen__kitchen_walls__003.jpg",
+    "mimeType": "image/jpeg",
+    "sizeBytes": 412899,
+    "base64Data": "/9j/4AAQ..."
+  }
+}
+```
+
+Separate from `getSectionThumbs` on purpose. Previews are a few kilobytes each
+and fetched the moment a section opens; this is hundreds of kilobytes and
+fetched only when asked for. Folding it in would make opening any section pay
+for pictures nobody looked at.
+
+**Errors:** `NOT_FOUND` if the attachment is missing or soft-deleted.
+`FORBIDDEN` if it belongs to another inspection. `VALIDATION_FAILED` if the file
+is larger than `maxPdfDownloadMb` (default 20), checked from Drive metadata
+before the bytes are read.
+
+---
+
+### `getNewInspectionOptions`
+Everything the "new inspection" form needs to render, in one call.
+
+**Auth:** staff.
+
+**Request:**
+```json
+{ "action": "getNewInspectionOptions", "auth": { ... }, "data": {} }
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "data": {
+    "schemas": [ { "schemaId": "schema_move_in_v1", "inspectionType": "move_in", "title": "Move-in", "version": 1 } ],
+    "assignableUsers": [ { "name": "Mina Ilić", "email": "mina@firma.rs" } ]
+  }
+}
+```
+
+`assignableUsers` is `[]` for a non-admin, and that is not a permission failure
+— only an admin sees the dropdown, because an inspector's new inspection is
+theirs by definition.
+
+The form used to fetch schemas and users separately, on the tap that opens it —
+`getSchemas` then `listUsers`, one after the other, neither depending on the
+other, each a separate Apps Script execution with its own cold start, auth and
+redirect. The client now requests this once at sign-in and again in the
+background whenever the list screen is shown, so opening the form is instant and
+costs no request at all. A client with no prefetched copy should call it
+directly; the reply is the same either way.
 
 ---
 
@@ -753,12 +975,15 @@ them; for a tenant token, the inspection the link was issued for.
 | `getAuthLog`, `assignInspection` | ✓ | ✗ | ✗ |
 | `getSchemas` | ✓ | ✓ | ✗ |
 | `getSchema` | ✓ | ✓ | ✗ |
+| `getNewInspectionOptions` | ✓ (with `assignableUsers`) | ✓ (`assignableUsers` empty) | ✗ |
 | `createInspection` | ✓ | ✓ (always assigned to themselves) | ✗ |
 | `listInspections` | ✓ (all) | ✓ (own only) | ✗ |
 | `getInspection` | ✓ | ✓ (own) | ✓ (own) |
 | `saveSection` | ✓ | ✓ (own) | ✓ (if status allows, own) |
 | `uploadAttachment` | ✓ | ✓ (own) | ✓ (if status allows, own) |
 | `deleteAttachment` | ✓ | ✓ (own) | ✗ |
+| `getSectionThumbs` | ✓ | ✓ (own) | ✓ (own) |
+| `getAttachmentFile` | ✓ | ✓ (own) | ✓ (own) |
 | `lockInspection` | ✓ | ✓ (own) | ✗ |
 | `unlockInspection` | ✓ | ✗ | ✗ |
 | `saveSignature` | ✓ | ✓ (own) | ✓ (only as `tenant`) |

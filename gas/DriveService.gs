@@ -177,7 +177,8 @@ const DriveService = (function () {
       const f = existing.next();
       if (f.getName().indexOf(prefix) === 0) index++;
     }
-    const ext = (mimeType === 'image/png') ? 'png' : 'jpg';
+    const EXT = { 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' };
+    const ext = EXT[mimeType] || 'jpg';
     const paddedIndex = String(index).padStart(3, '0');
     const fileName = `${prefix}${paddedIndex}.${ext}`;
 

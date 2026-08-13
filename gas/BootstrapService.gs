@@ -59,6 +59,7 @@ function CONFIG_DEFAULTS() {
     ['defaultTokenTtlHours', '168', 'Tenant link expiry hours (default 7 days)'],
     ['maxAttachmentsPerItem', '5', 'Max photos per item'],
     ['maxAttachmentsPerInspection', '80', 'Max photos per inspection'],
+    ['maxAttachmentMb', '8', 'Largest single photo uploadAttachment will accept'],
     ['imageMaxDimPx', '1600', 'Frontend should compress to this max dimension'],
     ['imageJpegQuality', '0.75', 'Frontend JPEG compression quality 0-1'],
     ['maxPdfDownloadMb', '20', 'Largest final PDF downloadPdf will return in one response'],

@@ -16,6 +16,8 @@ const suites = [
   ['Sheet timing counters', require('./sheet-stats.test')],
   ['Cell values', require('./cell-values.test')],
   ['Photo previews', require('./thumbnails.test')],
+  ['Photo upload validation', require('./attachment-validation.test')],
+  ['API contract', require('./api-contract.test')],
   ['Batch reads', require('./batch-read.test')],
   ['Section answers', require('./section-answers.test')],
   ['Config cache', require('./config-cache.test')],
